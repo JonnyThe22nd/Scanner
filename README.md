@@ -17,7 +17,11 @@ Android-App zum Scannen von LEGO-Minifiguren und Teilen.
 
 Jede Änderung im Repository baut automatisch eine neue Version. Sie installiert sich über die alte, deine Liste bleibt erhalten.
 
-## 2. BrickLink-Preise einrichten
+## 2. Preise
+
+**Ohne Schlüssel (Standard):** Nach jedem Scan öffnet sich oben in der App ein kleines Fenster mit der BrickLink-Preisseite des Teils. Darunter tippst du den Ø-Preis ein. Die App zeigt die Seite nur an und liest nichts automatisch aus, das wäre gegen die BrickLink-Regeln. Zeigt BrickLink Dollar statt Euro an, meldest du dich im Fenster einmal bei BrickLink an.
+
+**Mit Schlüssel (optional, automatisch):**
 
 Die BrickLink-API gibt es nur für **Verkäufer-Konten**. Du musst aber nichts verkaufen, der Laden kann geschlossen bleiben.
 
@@ -31,12 +35,12 @@ Die Schlüssel bleiben nur auf deinem Handy. Gib sie nicht weiter: Mit ihnen hat
 ## Gut zu wissen
 
 - **Teile und Farben:** Brickognize erkennt die Form, nicht die Farbe. Nach dem Scan wählst du die Farbe aus den Farben, die es für dieses Teil gibt. Ohne Farbe gilt der Durchschnitt über alle Farben.
-- **Preisquelle:** Gibt es keine Verkäufe in den letzten 6 Monaten, nimmt die App den Ø-Preis der aktuellen Angebote („Ø Angebote“). Du kannst jeden Preis auch selbst setzen („manuell“).
+- **Preisquelle (mit Schlüssel):** Gibt es keine Verkäufe in den letzten 6 Monaten, nimmt die App den Ø-Preis der aktuellen Angebote („Ø Angebote“). Du kannst jeden Preis auch selbst setzen („manuell“).
 - **Fotos:** Am besten ein Teil pro Foto, auf hellem, ruhigem Untergrund.
-- **Testen im Browser:** `www/index.html` mit `?mock` am Ende öffnen. Dann wird nichts echt erkannt, und die Preise sind Zufallswerte.
+- **Testen im Browser:** `www/index.html` mit `?mock` am Ende öffnen (`?mock&nokey` für den Modus ohne Schlüssel). Dann wird nichts echt erkannt, und die Preise sind Zufallswerte.
 
 ## Aufbau
 
 - `www/index.html`: die komplette App (HTML/CSS/JS)
-- `android/`: Android-Projekt ([Capacitor](https://capacitorjs.com) 8)
+- `android/`: Android-Projekt ([Capacitor](https://capacitorjs.com) 8), darin `PriceViewPlugin.java` für das kleine BrickLink-Fenster
 - `.github/workflows/apk.yml`: baut die APK auf GitHub

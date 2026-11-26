@@ -110,6 +110,19 @@ a{color:var(--r)}
 .toast.show{display:flex}
 .toast button{margin-left:auto;border:0;background:var(--y);color:#1a1a1a;border-radius:9px;padding:8px 12px;font-weight:700;flex:none}
 .ok{color:var(--ok)}.bad{color:var(--r)}
+.reader{position:fixed;inset:0;z-index:40;background:var(--bg);display:flex;flex-direction:column;overflow:auto}
+.win{flex:none;margin-top:env(safe-area-inset-top);background:var(--card);display:grid;place-items:center;text-align:center;padding:16px;color:var(--mut);font-size:14px;border-bottom:3px solid var(--y)}
+.win a{font-weight:700}
+.rpanel{padding:10px 16px calc(16px + env(safe-area-inset-bottom))}
+.rhead{display:grid;grid-template-columns:48px minmax(0,1fr) 44px;gap:10px;align-items:center}
+.rhead .thumb{width:48px;height:48px;border-radius:10px}
+.rhint{font-size:14px;margin:8px 0;color:var(--mut)}
+.rhint b{color:var(--ink)}
+.rin{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}
+.rin input{height:52px;border-radius:14px;border:2px solid var(--r);background:var(--card);padding:0 14px;font-size:22px;font-weight:700;color:var(--ink);width:100%}
+.rin .btn{padding:0 18px}
+.rfoot{display:flex;gap:16px;flex-wrap:wrap;font-size:14px;margin-top:4px}
+.rfoot .link{font-size:14px}
 </style>
 </head>
 <body>
@@ -125,7 +138,7 @@ a{color:var(--r)}
   </div>
 </header>
 
-<div id="setupNote" class="note" hidden><span>BrickLink-Schlüssel fehlen – ohne sie gibt es keine Preise.</span><button id="btnSetup">Einrichten</button></div>
+<div id="setupNote" class="note" hidden><span>Ohne BrickLink-Schlüssel liest du den Preis nach dem Scan selbst ab. Mit Schlüssel kommt er automatisch.</span><button id="btnSetup">Schlüssel</button></div>
 
 <div class="bar">
   <select id="sort" aria-label="Sortierung">
@@ -146,6 +159,7 @@ a{color:var(--r)}
 <input type="file" id="fileGal" accept="image/*" hidden>
 
 <div class="veil" id="veil"><div class="sheet" id="sheet" role="dialog" aria-modal="true"></div></div>
+<div class="reader" id="reader" hidden></div>
 <div class="toast" id="toast"><span id="toastMsg"></span><button id="toastBtn" hidden>Rückgängig</button></div>
 
 <script>
@@ -153,13 +167,16 @@ a{color:var(--r)}
 /* ================================================================ state */
 const KEY = 'brickscan.v1';
 const MOCK = /[?&]mock/.test(location.search);
+const CAP = window.Capacitor;
+const NATIVE = !!(CAP && CAP.nativePromise && CAP.getPlatform && CAP.getPlatform() !== 'web');
+const nativeCall = (m, o) => NATIVE ? CAP.nativePromise('PriceView', m, o || {}) : Promise.resolve();
 const blank = () => ({items: [], settings: {ck:'', cs:'', tk:'', ts:'', currency:'EUR', cond:'U'}, colors: null});
 let S = blank();
 try { const raw = localStorage.getItem(KEY); if (raw) S = Object.assign(blank(), JSON.parse(raw)); S.settings = Object.assign(blank().settings, S.settings); } catch (e) {}
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast('Speichern fehlgeschlagen – Speicher voll?'); } };
 let tab = 'fig', sort = 'new';
 try { tab = localStorage.getItem(KEY + '.tab') || 'fig'; } catch (e) {}
-const blReady = () => MOCK || ['ck','cs','tk','ts'].every(k => (S.settings[k] || '').trim());
+const blReady = () => (MOCK && !/nokey/.test(location.search)) || ['ck','cs','tk','ts'].every(k => (S.settings[k] || '').trim());
 
 /* ================================================================ helpers */
 const $ = id => document.getElementById(id);
@@ -300,8 +317,8 @@ function thumbHtml(it) {
   return `<div class="thumb"><img src="${esc(main)}" alt="" loading="lazy" data-fb="${esc(fb.join(' '))}"></div>`;
 }
 function srcLabel(it) {
-  if (it.err && it.price == null) return `<small class="err">${esc(it.err)}</small>`;
-  return {sold: `<small>Ø verkauft${it.sold_qty ? ' · ' + esc(it.sold_qty) + '×' : ''}</small>`, stock: '<small>Ø Angebote</small>', manual: '<small>manuell</small>', none: '<small class="err">kein Preis</small>'}[it.src] || '';
+  if (it.err && it.price == null && blReady()) return `<small class="err">${esc(it.err)}</small>`;
+  return {sold: `<small>Ø verkauft${it.sold_qty ? ' · ' + esc(it.sold_qty) + '×' : ''}</small>`, stock: '<small>Ø Angebote</small>', manual: '<small>abgelesen</small>', none: '<small class="err">Preis fehlt</small>'}[it.src] || '';
 }
 function render() {
   const a = sums(), f = sums('fig'), p = sums('part');
@@ -312,6 +329,7 @@ function render() {
   for (const k of ['fig','part']) $('tab-' + k).setAttribute('aria-selected', String(tab === k));
   $('scanLabel').textContent = tab === 'fig' ? 'Minifig scannen' : 'Teil scannen';
   $('setupNote').hidden = blReady();
+  $('btnRefresh').hidden = !blReady();
   let its = S.items.filter(i => i.kind === tab);
   if (sort === 'val') its = its.slice().sort((x, y) => (y.price || 0) * y.qty - (x.price || 0) * x.qty);
   else if (sort === 'name') its = its.slice().sort((x, y) => x.name.localeCompare(y.name));
@@ -319,7 +337,7 @@ function render() {
   $('list').innerHTML = its.length ? its.map(it => `<li><button class="item" data-uid="${esc(it.uid)}">
       ${thumbHtml(it)}
       <div><div class="nm">${esc(it.name)}</div>
-        <div class="meta"><span>${esc(it.no)}</span>${it.color_name ? `<span><i class="sw" style="background:#${esc(/^[0-9a-f]{6}$/i.test(it.color_rgb || '') ? it.color_rgb : 'ccc')}"></i>${esc(it.color_name)}</span>` : ''}<span>${it.cond === 'N' ? 'Neu' : 'Gebraucht'}</span>${it.qty > 1 ? `<span>${it.qty}× à ${money(it.price, it.currency, true)}</span>` : ''}</div></div>
+        <div class="meta"><span>${esc(it.no)}</span>${it.color_name ? `<span>${/^[0-9a-f]{6}$/i.test(it.color_rgb || '') ? `<i class="sw" style="background:#${esc(it.color_rgb)}"></i>` : ''}${esc(it.color_name)}</span>` : ''}<span>${it.cond === 'N' ? 'Neu' : 'Gebraucht'}</span>${it.qty > 1 ? `<span>${it.qty}× à ${money(it.price, it.currency, true)}</span>` : ''}</div></div>
       <div class="pr"><b>${money(it.price == null ? null : it.price * it.qty, it.currency, true)}</b>${srcLabel(it)}</div>
     </button></li>`).join('')
     : `<li class="empty"><svg viewBox="0 0 120 80"><rect x="10" y="30" width="100" height="44" rx="6" fill="var(--card)" stroke="var(--line)" stroke-width="2"/><rect x="22" y="16" width="22" height="16" rx="4" fill="var(--y)"/><rect x="49" y="16" width="22" height="16" rx="4" fill="var(--y)"/><rect x="76" y="16" width="22" height="16" rx="4" fill="var(--y)"/></svg>
@@ -336,7 +354,7 @@ const veil = $('veil'), sheet = $('sheet');
 function openSheet(html) { if (!veil.classList.contains('open')) $('toast').classList.remove('show'); sheet.innerHTML = '<div class="grab"></div>' + html; veil.classList.add('open'); sheet.scrollTop = 0; }
 function closeSheet() { veil.classList.remove('open'); sheet.innerHTML = ''; scan = null; }
 veil.addEventListener('click', e => { if (e.target === veil) closeSheet(); });
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && veil.classList.contains('open')) closeSheet(); });
+document.addEventListener('keydown', e => { if (e.key !== 'Escape') return; if (!$('reader').hidden) { $('reader').hidden = true; $('reader').innerHTML = ''; } else if (veil.classList.contains('open')) closeSheet(); });
 
 /* ---------- scan flow */
 let scan = null;
@@ -366,7 +384,7 @@ async function loadColors() {
   const my = scan; if (!my || my.kind !== 'part') return;
   const c = my.cands[my.sel]; if (!c) return;
   my.colors = null; my.colorErr = ''; drawScan();
-  if (!blReady()) { my.colors = []; my.colorErr = 'Farben brauchen BrickLink-Schlüssel'; drawScan(); return; }
+  if (!blReady()) { my.colors = []; return; }
   try { const cols = await knownColors(c.no); if (scan === my && my.cands[my.sel] === c) { my.colors = cols; if (!cols.some(x => String(x.id) === String(my.color))) my.color = ''; drawScan(); } }
   catch (e) { if (scan === my) { my.colors = []; my.colorErr = e.message; drawScan(); } }
 }
@@ -376,7 +394,8 @@ function drawScan() {
   const optsHtml = `<h3>Angaben</h3><div class="opts">
       <label>Zustand<span class="seg"><button data-cond="U" aria-pressed="${s.cond === 'U'}">Gebraucht</button><button data-cond="N" aria-pressed="${s.cond === 'N'}">Neu</button></span></label>
       <label>Anzahl<span class="step"><button data-q="-1" aria-label="weniger">−</button><input id="qty" inputmode="numeric" value="${s.qty}" aria-label="Anzahl"><button data-q="1" aria-label="mehr">+</button></span></label>
-      ${isPart && !s.manual ? `<label>Farbe${s.colors == null ? '<select disabled><option>Farben werden geladen …</option></select>'
+      ${isPart && !s.manual && !blReady() ? `<label>Farbe (optional)<input id="colorTxt" value="${esc(s.colorTxt || '')}" placeholder="z. B. Rot" style="height:44px;border-radius:12px;border:1px solid var(--line);background:var(--card);padding:0 12px;font-size:16px;width:180px"></label>` : ''}
+      ${isPart && !s.manual && blReady() ? `<label>Farbe${s.colors == null ? '<select disabled><option>Farben werden geladen …</option></select>'
         : `<select id="color"><option value="">Alle Farben (Durchschnitt)</option>${s.colors.map(c => `<option value="${esc(c.id)}" ${String(c.id) === String(s.color) ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>`}</label>` : ''}
     </div>${s.colorErr ? `<p class="center" style="font-size:13px;text-align:left">${esc(s.colorErr)}</p>` : ''}`;
   if (s.manual) {
@@ -405,6 +424,7 @@ async function addItem(base) {
   await applyPrice(it);
   S.items.push(it); save();
   tab = it.kind; closeSheet(); render();
+  if (!blReady()) return openReader(it);
   toast(it.price != null ? `${it.name}: ${money(it.price * it.qty, it.currency, true)}` : `${it.name} hinzugefügt – ${it.err || 'kein Preis gefunden'}`);
 }
 
@@ -418,9 +438,10 @@ function openItem(u) {
       <label>Anzahl<span class="step"><button data-iq="-1" aria-label="weniger">−</button><input id="iqty" inputmode="numeric" value="${it.qty}" aria-label="Anzahl"><button data-iq="1" aria-label="mehr">+</button></span></label>
     </div>
     <h3>Preis pro Stück selbst setzen</h3>
-    <div class="row"><label class="field" style="flex:1;margin:0"><input id="iprice" inputmode="decimal" placeholder="leer = BrickLink-Preis" value="${it.src === 'manual' ? esc(String(it.price).replace('.', ',')) : ''}" aria-label="Preis pro Stück"></label><button class="btn dark" data-iact="setprice" style="padding:0 16px;height:46px">Übernehmen</button></div>
+    <div class="row"><label class="field" style="flex:1;margin:0"><input id="iprice" inputmode="decimal" placeholder="${blReady() ? 'leer = BrickLink-Preis' : 'z. B. 4,50'}" value="${it.src === 'manual' ? esc(String(it.price).replace('.', ',')) : ''}" aria-label="Preis pro Stück"></label><button class="btn dark" data-iact="setprice" style="padding:0 16px;height:46px">Übernehmen</button></div>
     <div class="acts">
-      <button class="btn" data-iact="reprice">BrickLink-Preis neu laden</button>
+      <button class="btn dark" data-iact="read">Preis auf BrickLink ablesen</button>
+      ${blReady() ? '<button class="btn" data-iact="reprice">BrickLink-Preis automatisch laden</button>' : ''}
       <a class="btn" style="display:grid;place-items:center;text-decoration:none;color:inherit" href="${esc(blLink(it))}" target="_blank" rel="noopener">Auf BrickLink ansehen</a>
       <button class="btn del" data-iact="delete">Aus der Liste entfernen</button>
     </div>`);
@@ -428,6 +449,7 @@ function openItem(u) {
 }
 async function itemAction(act, el) {
   const u = sheet.dataset.uid, it = S.items.find(i => i.uid === u); if (!it) return;
+  if (act === 'read') { closeSheet(); return openReader(it); }
   if (act === 'delete') {
     const idx = S.items.indexOf(it); S.items.splice(idx, 1); save(); closeSheet(); render();
     toast(`${it.name} entfernt`, () => { S.items.splice(idx, 0, it); save(); render(); });
@@ -446,7 +468,7 @@ async function itemAction(act, el) {
 function openSettings() {
   const st = S.settings;
   openSheet(`<h2>Einstellungen</h2>
-    <div class="help"><b>BrickLink-Schlüssel bekommen</b><ol>
+    <div class="help"><b>Optional: BrickLink-Schlüssel für automatische Preise</b><br>Ohne Schlüssel liest du den Preis im kleinen BrickLink-Fenster selbst ab.<ol>
       <li>Bei BrickLink anmelden. Die API gibt es nur für Verkäufer-Konten („Upgrade to Seller“, der Laden kann geschlossen bleiben).</li>
       <li><a href="https://www.bricklink.com/v2/api/register_consumer.page" target="_blank" rel="noopener">API-Registrierung öffnen</a></li>
       <li>Als IP-Adresse <b>0.0.0.0</b> und als Maske <b>0.0.0.0</b> eintragen – sonst klappt es am Handy nicht.</li>
@@ -499,6 +521,54 @@ async function settingsAction(act, el) {
   }
 }
 
+/* ---------- price reader: BrickLink-Seite im kleinen Fenster, Preis selbst eintippen */
+let readerItem = null;
+const reader = $('reader');
+function parsePrice(v) {
+  let t = String(v).trim().replace(/[^\d,.-]/g, '');
+  if (t.includes(',')) t = t.replace(/\./g, '').replace(',', '.');
+  const n = parseFloat(t); return isNaN(n) || n < 0 ? null : n;
+}
+function openReader(it) {
+  readerItem = it;
+  const url = blLink(it), used = it.cond !== 'N';
+  const winH = Math.round(Math.max(240, Math.min(window.innerHeight * 0.42, 520)));
+  reader.innerHTML = `<div class="win" id="win" style="height:${winH}px">${NATIVE ? 'BrickLink wird geladen …'
+      : `<div>Hier erscheint in der App die BrickLink-Preisseite.<br><a href="${esc(url)}" target="_blank" rel="noopener">BrickLink-Preisseite öffnen</a></div>`}</div>
+    <div class="rpanel">
+      <div class="rhead">${thumbHtml(it)}<div><div class="nm">${esc(it.name)}</div><div class="meta"><span>${esc(it.no)}</span>${it.color_name ? `<span>${esc(it.color_name)}</span>` : ''}<span>${used ? 'Gebraucht' : 'Neu'}</span>${it.qty > 1 ? `<span>${it.qty}×</span>` : ''}</div></div>
+        <button class="icon-btn" id="rclose" aria-label="Schließen" style="margin:0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+      <p class="rhint">Bei <b>Past 6 Months Sales</b> in der Spalte <b>${used ? 'Used' : 'New'}</b> den Wert <b>Avg Price</b> ablesen${it.kind === 'part' && !it.color_id ? ' (oben zuerst die <b>Farbe</b> wählen)' : ''}. Preis pro Stück:</p>
+      <div class="rin"><input id="rprice" inputmode="decimal" placeholder="0,00" value="${it.price != null ? esc(String(+it.price.toFixed(3)).replace('.', ',')) : ''}" aria-label="Preis pro Stück in ${esc(cur())}"><button class="btn pri" id="rsave">Übernehmen</button></div>
+      <div class="rfoot">${NATIVE ? '<button class="link" id="rreload">Seite neu laden</button>' : ''}<a href="${esc(url)}" target="_blank" rel="noopener" style="padding:10px 0">Im Browser öffnen</a></div>
+      <p class="rhint" style="font-size:13px">Zeigt BrickLink US $ statt ${esc(cur())}? Melde dich im Fenster einmal bei BrickLink an, dann gilt deine Währung.</p>
+    </div>`;
+  reader.hidden = false;
+  if (NATIVE) requestAnimationFrame(() => {
+    const r = $('win').getBoundingClientRect();
+    nativeCall('open', {url, top: r.top, height: r.height}).catch(e => toast(String(e && e.message || e)));
+  });
+}
+function closeReader(fromNative) {
+  if (reader.hidden) return;
+  reader.hidden = true; reader.innerHTML = ''; readerItem = null;
+  if (!fromNative) nativeCall('close').catch(() => {});
+}
+window.addEventListener('priceviewclosed', () => closeReader(true));
+reader.addEventListener('click', e => {
+  const t = e.target.closest('button'); if (!t) return;
+  if (t.id === 'rclose') return closeReader();
+  if (t.id === 'rreload') return nativeCall('reload').catch(() => {});
+  if (t.id === 'rsave') {
+    const it = readerItem, v = parsePrice($('rprice').value);
+    if (v == null) { $('rprice').focus(); return toast('Bitte den Preis eintippen, z. B. 4,50'); }
+    Object.assign(it, {price: v, src: 'manual', err: null, currency: cur(), at: Date.now()});
+    save(); closeReader(); render();
+    toast(`${it.name}: ${money(v * it.qty, it.currency, true)}`);
+  }
+});
+reader.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'rprice') $('rsave').click(); });
+
 /* ---------- refresh all */
 let refreshing = false;
 async function refreshAll() {
@@ -530,8 +600,8 @@ sheet.addEventListener('click', e => {
     if (d.act === 'manual') { if (!scan) scan = {kind: tab, cands: [], sel: 0, cond: S.settings.cond || 'U', qty: 1, photo: ''}; scan.manual = true; return drawScan(); }
     if (d.act === 'back') { s.manual = false; drawScan(); if (s.kind === 'part' && s.colors == null) loadColors(); return; }
     if (d.act === 'add') {
-      const c = s.cands[s.sel]; const col = s.color && S.colors ? S.colors[s.color] : null;
-      return addItem({kind: s.kind, no: c.no, name: c.name, img2: c.img, color_id: col ? col.id : null, color_name: col ? col.name : null, color_rgb: col ? col.rgb : null});
+      const c = s.cands[s.sel]; const col = s.color && S.colors && blReady() ? S.colors[s.color] : null;
+      return addItem({kind: s.kind, no: c.no, name: c.name, img2: c.img, color_id: col ? col.id : null, color_name: col ? col.name : (s.kind === 'part' && (s.colorTxt || '').trim() ? s.colorTxt.trim() : null), color_rgb: col ? col.rgb : null});
     }
     if (d.act === 'addManual') {
       const no = $('mNo').value.trim(); if (!no) { $('mNo').focus(); return toast('Bitte BrickLink-Nummer eingeben'); }
@@ -552,14 +622,15 @@ sheet.addEventListener('click', e => {
   if (d.scond) { t.parentNode.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b === t))); return; }
   if (d.sact) return settingsAction(d.sact, t);
 });
+sheet.addEventListener('input', e => { if (e.target.id === 'colorTxt' && scan) scan.colorTxt = e.target.value; });
 sheet.addEventListener('change', e => {
   if (e.target.id === 'color' && scan) scan.color = e.target.value;
+  if (e.target.id === 'colorTxt' && scan) scan.colorTxt = e.target.value;
   if (e.target.id === 'qty' && scan) scan.qty = Math.max(1, parseInt(e.target.value, 10) || 1);
   if (e.target.id === 'iqty') { const it = S.items.find(i => i.uid === sheet.dataset.uid); if (it) { it.qty = Math.max(1, parseInt(e.target.value, 10) || 1); save(); render(); openItem(it.uid); } }
 });
 
 render();
-if (!blReady() && !S.items.length) setTimeout(() => toast('Tipp: Erst BrickLink-Schlüssel in den Einstellungen eintragen'), 600);
 }
 </script>
 </body>
