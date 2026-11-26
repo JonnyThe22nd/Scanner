@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#FFCF00">
+<title>BrickScan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+/* VOICE: freundlich, griffig, wie ein Sortierkasten
+   IDEA: Liste = Sammelkasten, Kopf = gelbe Preis-Banderole
+   PICTURE: die Teilebilder selbst
+   COLOUR/TYPE: LEGO-Gelb, Rot als Aktion, Rubik
+   LAYOUT: Kopf mit Summe, 2 Tabs, Liste, Scan-Leiste unten */
+:root{color-scheme:light dark;
+  --y:#FFCF00;--y2:#F2B700;--r:#D01012;--r2:#A80C0E;
+  --bg:light-dark(#ffffff,#121212);--card:light-dark(#f4f4f2,#1d1d1d);--line:light-dark(#e4e2dc,#2c2c2c);
+  --ink:light-dark(#1a1a1a,#f2f2f2);--mut:light-dark(#6b6b6b,#a3a3a3);--ok:#1f8a3b;--warn:#b35c00}
+:root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}
+*{box-sizing:border-box;min-width:0;-webkit-tap-highlight-color:transparent}
+[hidden]{display:none!important}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 Rubik,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+body{overflow-x:clip;padding-bottom:calc(96px + env(safe-area-inset-bottom))}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid var(--r);outline-offset:2px}
+.top{position:sticky;top:0;z-index:5;background:var(--y);color:#1a1a1a;padding:calc(10px + env(safe-area-inset-top)) 16px 0}
+.row{display:flex;align-items:center;gap:10px}
+.brand{font-weight:800;font-size:15px;letter-spacing:.2px;display:flex;align-items:center;gap:8px}
+.stud{width:22px;height:22px}
+.icon-btn{margin-left:auto;width:44px;height:44px;border:0;border-radius:12px;background:rgba(0,0,0,.08);display:grid;place-items:center}
+.icon-btn svg{width:22px;height:22px}
+.total{padding:6px 0 12px}
+.total small{display:block;font-size:13px;font-weight:500;opacity:.75}
+.total b{display:block;font-size:clamp(34px,10vw,48px);font-weight:800;line-height:1.05;white-space:nowrap}
+.total span{font-size:14px;opacity:.8}
+.tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.tab{border:0;background:transparent;padding:10px 6px 12px;border-radius:12px 12px 0 0;font-weight:700;font-size:16px;color:#1a1a1a;opacity:.7}
+.tab em{display:block;font-style:normal;font-weight:500;font-size:13px;white-space:nowrap}
+.tab[aria-selected=true]{background:var(--bg);color:var(--ink);opacity:1}
+.bar{display:flex;gap:8px;align-items:center;padding:12px 16px 4px;flex-wrap:wrap}
+.bar select,.chip{height:40px;border-radius:10px;border:1px solid var(--line);background:var(--card);padding:0 12px;font-size:15px}
+.chip{display:inline-flex;align-items:center;gap:6px;margin-left:auto}
+.note{margin:10px 16px 0;padding:10px 12px;border-radius:12px;background:light-dark(#fff4d1,#2b2410);font-size:14px;display:flex;gap:10px;align-items:center}
+.note button{margin-left:auto;border:0;background:var(--ink);color:var(--bg);border-radius:9px;padding:8px 12px;font-weight:600;flex:none}
+.list{list-style:none;margin:0;padding:8px 16px}
+.item{display:grid;grid-template-columns:72px minmax(0,1fr) auto;gap:12px;align-items:center;padding:10px;border-radius:16px;background:var(--card);margin-bottom:8px;border:0;width:100%;text-align:left}
+.thumb{width:72px;height:72px;border-radius:12px;background:#fff;display:grid;place-items:center;overflow:hidden}
+.thumb img{max-width:100%;max-height:100%;object-fit:contain}
+.nm{font-weight:600;font-size:15px;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.meta{font-size:13px;color:var(--mut);margin-top:3px;display:flex;flex-wrap:wrap;gap:4px 8px}
+.sw{display:inline-block;width:11px;height:11px;border-radius:3px;border:1px solid rgba(0,0,0,.25);vertical-align:-1px;margin-right:3px}
+.pr{text-align:right;white-space:nowrap}
+.pr b{display:block;font-size:17px}
+.pr small{display:block;font-size:12px;color:var(--mut)}
+.pr .err{color:var(--warn)}
+.empty{text-align:center;padding:48px 24px;color:var(--mut)}
+.empty svg{width:120px;height:auto;margin-bottom:12px}
+.empty p{margin:4px 0}
+.dock{position:fixed;left:0;right:0;bottom:0;z-index:6;padding:12px 16px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(to top,var(--bg) 70%,transparent);display:flex;gap:10px}
+.scan{flex:1;height:58px;border:0;border-radius:18px;background:var(--r);color:#fff;font-weight:700;font-size:18px;display:flex;align-items:center;justify-content:center;gap:10px;box-shadow:0 6px 0 var(--r2)}
+.scan:active{transform:translateY(3px);box-shadow:0 3px 0 var(--r2)}
+.scan svg{width:24px;height:24px}
+.gal{width:58px;height:58px;border-radius:18px;border:2px solid var(--line);background:var(--card);display:grid;place-items:center}
+.gal svg{width:24px;height:24px}
+.veil{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.45);display:none;align-items:flex-end;justify-content:center}
+.veil.open{display:flex}
+.sheet{background:var(--bg);width:100%;max-width:640px;max-height:92vh;overflow:auto;border-radius:22px 22px 0 0;padding:8px 16px calc(18px + env(safe-area-inset-bottom));animation:up .22s ease-out}
+@keyframes up{from{transform:translateY(40px);opacity:.4}}
+@media (prefers-reduced-motion:reduce){.sheet{animation:none}}
+.grab{width:44px;height:5px;border-radius:3px;background:var(--line);margin:4px auto 10px}
+.sheet h2{font-size:22px;margin:4px 0 12px;line-height:1.15}
+.sheet h3{font-size:15px;margin:16px 0 8px;color:var(--mut);font-weight:600}
+.photo{display:flex;gap:12px;align-items:center;margin-bottom:6px}
+.photo img{width:84px;height:84px;object-fit:cover;border-radius:12px;background:var(--card)}
+.cands{display:grid;gap:8px}
+.cand{display:grid;grid-template-columns:64px minmax(0,1fr) auto;gap:12px;align-items:center;padding:8px;border-radius:14px;border:2px solid var(--line);background:var(--card);text-align:left;width:100%}
+.cand[aria-checked=true]{border-color:var(--r);background:light-dark(#fff1f1,#2a1415)}
+.cand .thumb{width:64px;height:64px}
+.score{font-size:13px;font-weight:700;white-space:nowrap}
+.meter{height:5px;border-radius:3px;background:var(--line);margin-top:6px;overflow:hidden}
+.meter i{display:block;height:100%;background:var(--ok)}
+.seg{display:inline-grid;grid-auto-flow:column;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.seg button{border:0;background:var(--card);padding:0 16px;height:44px;font-weight:600}
+.seg button[aria-pressed=true]{background:var(--ink);color:var(--bg)}
+.step{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.step button{width:44px;height:44px;border:0;background:var(--card);font-size:22px;font-weight:600}
+.step input{width:56px;height:44px;border:0;text-align:center;background:var(--bg);font-size:16px}
+.opts{display:flex;flex-wrap:wrap;gap:14px 18px;align-items:flex-end}
+.opts label{display:grid;gap:6px;font-size:13px;color:var(--mut);font-weight:600}
+.field{display:grid;gap:6px;margin-bottom:12px;font-size:13px;color:var(--mut);font-weight:600}
+.field input,.field select,.opts select{height:46px;border-radius:12px;border:1px solid var(--line);background:var(--card);padding:0 12px;font-size:16px;color:var(--ink);font-weight:400;width:100%}
+.opts select{min-width:200px}
+.acts{display:grid;gap:8px;margin-top:18px}
+.btn{height:52px;border-radius:14px;border:0;font-weight:700;font-size:16px;background:var(--card);border:1px solid var(--line)}
+.btn.pri{background:var(--r);color:#fff;border:0}
+.btn.dark{background:var(--ink);color:var(--bg);border:0}
+.btn.del{color:var(--r)}
+.btn:disabled{opacity:.5}
+.link{background:none;border:0;color:var(--r);font-weight:600;padding:10px 0;text-decoration:underline}
+a{color:var(--r)}
+.spin{width:44px;height:44px;border-radius:50%;border:5px solid var(--line);border-top-color:var(--r);animation:sp 0.9s linear infinite;margin:24px auto 10px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.center{text-align:center;color:var(--mut)}
+.help{font-size:14px;color:var(--mut);background:var(--card);border-radius:12px;padding:12px 14px;margin:6px 0 14px}
+.help ol{margin:6px 0 0;padding-left:20px}.help li{margin:3px 0}
+.big-price{font-size:30px;font-weight:800}
+.toast{position:fixed;left:16px;right:16px;bottom:calc(92px + env(safe-area-inset-bottom));z-index:30;background:var(--ink);color:var(--bg);border-radius:14px;padding:12px 14px;display:none;align-items:center;gap:12px;max-width:600px;margin:auto;font-size:15px}
+.toast.show{display:flex}
+.toast button{margin-left:auto;border:0;background:var(--y);color:#1a1a1a;border-radius:9px;padding:8px 12px;font-weight:700;flex:none}
+.ok{color:var(--ok)}.bad{color:var(--r)}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="row">
+    <div class="brand"><svg class="stud" viewBox="0 0 24 24"><rect x="1" y="7" width="22" height="15" rx="2.5" fill="#D01012"/><rect x="4" y="2.5" width="6" height="5.5" rx="1.2" fill="#D01012"/><rect x="14" y="2.5" width="6" height="5.5" rx="1.2" fill="#D01012"/><rect x="1" y="7" width="22" height="3" fill="#A80C0E"/></svg>BrickScan</div>
+    <button class="icon-btn" id="btnSettings" aria-label="Einstellungen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+  </div>
+  <div class="total"><small>Gesamtwert (Ø BrickLink-Verkäufe)</small><b id="total">0,00 €</b><span id="totalSub">Noch nichts gescannt</span></div>
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" id="tab-fig" aria-selected="true">Minifigs<em id="sum-fig">0 · 0,00 €</em></button>
+    <button class="tab" role="tab" id="tab-part" aria-selected="false">Teile<em id="sum-part">0 · 0,00 €</em></button>
+  </div>
+</header>
+
+<div id="setupNote" class="note" hidden><span>BrickLink-Schlüssel fehlen – ohne sie gibt es keine Preise.</span><button id="btnSetup">Einrichten</button></div>
+
+<div class="bar">
+  <select id="sort" aria-label="Sortierung">
+    <option value="new">Neueste zuerst</option>
+    <option value="val">Höchster Wert</option>
+    <option value="name">Name A–Z</option>
+  </select>
+  <button class="chip" id="btnRefresh"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg><span>Preise neu</span></button>
+</div>
+
+<ul class="list" id="list"></ul>
+
+<div class="dock">
+  <button class="scan" id="btnScan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h2l1.6-2.2h5.8L16.5 6h2A2.5 2.5 0 0 1 21 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/><circle cx="12" cy="13" r="3.8"/></svg><span id="scanLabel">Minifig scannen</span></button>
+  <button class="gal" id="btnGallery" aria-label="Foto aus Galerie"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/></svg></button>
+</div>
+<input type="file" id="fileCam" accept="image/*" capture="environment" hidden>
+<input type="file" id="fileGal" accept="image/*" hidden>
+
+<div class="veil" id="veil"><div class="sheet" id="sheet" role="dialog" aria-modal="true"></div></div>
+<div class="toast" id="toast"><span id="toastMsg"></span><button id="toastBtn" hidden>Rückgängig</button></div>
+
+<script>
+{
+/* ================================================================ state */
+const KEY = 'brickscan.v1';
+const MOCK = /[?&]mock/.test(location.search);
+const blank = () => ({items: [], settings: {ck:'', cs:'', tk:'', ts:'', currency:'EUR', cond:'U'}, colors: null});
+let S = blank();
+try { const raw = localStorage.getItem(KEY); if (raw) S = Object.assign(blank(), JSON.parse(raw)); S.settings = Object.assign(blank().settings, S.settings); } catch (e) {}
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast('Speichern fehlgeschlagen – Speicher voll?'); } };
+let tab = 'fig', sort = 'new';
+try { tab = localStorage.getItem(KEY + '.tab') || 'fig'; } catch (e) {}
+const blReady = () => MOCK || ['ck','cs','tk','ts'].every(k => (S.settings[k] || '').trim());
+
+/* ================================================================ helpers */
+const $ = id => document.getElementById(id);
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const safeUrl = u => (typeof u === 'string' && /^(https:\/\/|data:image\/)/.test(u)) ? u : '';
+const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+const cur = () => S.settings.currency || 'EUR';
+function money(v, c, small) {
+  if (v == null || isNaN(v)) return '–';
+  const d = small && v < 1 ? 3 : 2;
+  try { return new Intl.NumberFormat('de-DE', {style:'currency', currency:c || cur(), minimumFractionDigits:2, maximumFractionDigits:d}).format(v); }
+  catch (e) { return v.toFixed(2) + ' ' + (c || ''); }
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let toastT, undoFn = null;
+function toast(msg, undo) {
+  $('toastMsg').textContent = msg; undoFn = undo || null; $('toastBtn').hidden = !undo;
+  $('toast').classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => $('toast').classList.remove('show'), undo ? 6000 : 3500);
+}
+$('toastBtn').onclick = () => { if (undoFn) undoFn(); undoFn = null; $('toast').classList.remove('show'); };
+
+/* ================================================================ Brickognize */
+function blIdFrom(it) {
+  for (const s of it.external_sites || []) {
+    const u = String(s.url || '');
+    if (/bricklink/i.test((s.name || '') + u)) {
+      try { const q = new URL(u).searchParams; for (const k of ['P','M','S','G']) if (q.get(k)) return q.get(k); } catch (e) {}
+    }
+  }
+  return it.id;
+}
+async function recognize(kind, blob) {
+  if (MOCK) return mockRecognize(kind);
+  const fd = new FormData();
+  fd.append('query_image', blob, 'scan.jpg');
+  let res;
+  try { res = await fetch(`https://api.brickognize.com/predict/${kind}/`, {method:'POST', body:fd, headers:{Accept:'application/json'}}); }
+  catch (e) { throw new Error('Keine Verbindung zu Brickognize. Internet an?'); }
+  if (!res.ok) throw new Error('Brickognize antwortet mit Fehler ' + res.status);
+  const j = await res.json();
+  return (j.items || []).slice(0, 6).map(it => ({no: blIdFrom(it), name: it.name || it.id, img: it.img_url, score: it.score, category: it.category}));
+}
+
+/* ================================================================ BrickLink (OAuth 1.0 HMAC-SHA1) */
+const BL = 'https://api.bricklink.com/api/store/v1';
+const enc = s => encodeURIComponent(String(s)).replace(/[!'()*]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+async function hmacSha1(key, msg) {
+  const te = new TextEncoder();
+  const k = await crypto.subtle.importKey('raw', te.encode(key), {name:'HMAC', hash:'SHA-1'}, false, ['sign']);
+  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', k, te.encode(msg)));
+  let s = ''; sig.forEach(b => s += String.fromCharCode(b)); return btoa(s);
+}
+async function blGet(path, params = {}) {
+  const st = S.settings, url = BL + path;
+  const p = Object.fromEntries(Object.entries(params).filter(([, v]) => v !== '' && v != null));
+  const oauth = {oauth_consumer_key: st.ck.trim(), oauth_token: st.tk.trim(), oauth_signature_method: 'HMAC-SHA1',
+    oauth_timestamp: String(Math.floor(Date.now() / 1000)), oauth_nonce: uid() + uid(), oauth_version: '1.0'};
+  const pairs = Object.entries({...p, ...oauth}).map(([k, v]) => [enc(k), enc(v)]).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0);
+  const base = ['GET', enc(url), enc(pairs.map(x => x.join('=')).join('&'))].join('&');
+  oauth.oauth_signature = await hmacSha1(enc(st.cs.trim()) + '&' + enc(st.ts.trim()), base);
+  const auth = 'OAuth realm="", ' + Object.entries(oauth).map(([k, v]) => `${k}="${enc(v)}"`).join(', ');
+  const qs = new URLSearchParams(p).toString();
+  let res;
+  try { res = await fetch(url + (qs ? '?' + qs : ''), {headers: {Authorization: auth, Accept: 'application/json'}}); }
+  catch (e) { throw new Error('Keine Verbindung zu BrickLink'); }
+  let j; try { j = await res.json(); } catch (e) { throw new Error('BrickLink: ungültige Antwort (' + res.status + ')'); }
+  const m = j.meta || {};
+  if (m.code !== 200) {
+    if (m.code === 401) throw new Error('BrickLink lehnt die Schlüssel ab (' + (m.description || m.message || '401') + ')');
+    if (m.code === 404) throw new Error('Bei BrickLink nicht gefunden');
+    throw new Error('BrickLink ' + (m.code || res.status) + ': ' + (m.message || ''));
+  }
+  return j.data;
+}
+async function allColors() {
+  if (S.colors) return S.colors;
+  const data = MOCK ? [{color_id:11,color_name:'Black',color_code:'212121'},{color_id:5,color_name:'Red',color_code:'B30006'},{color_id:1,color_name:'White',color_code:'FFFFFF'},{color_id:86,color_name:'Light Bluish Gray',color_code:'AFB5C7'},{color_id:3,color_name:'Yellow',color_code:'F7D117'}] : await blGet('/colors');
+  S.colors = {}; for (const c of data) S.colors[c.color_id] = {id: c.color_id, name: c.color_name, rgb: c.color_code || ''};
+  save(); return S.colors;
+}
+async function knownColors(no) {
+  const cols = await allColors();
+  const ids = MOCK ? Object.keys(cols).map(Number) : (await blGet(`/items/PART/${encodeURIComponent(no)}/colors`)).map(k => k.color_id);
+  return ids.map(i => cols[i]).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
+}
+async function priceFor(it) {
+  if (MOCK) { await sleep(250); return {price: +(it.kind === 'part' ? Math.random() * 0.8 + 0.03 : Math.random() * 30 + 2).toFixed(3), currency: cur(), src: 'sold', sold_qty: Math.floor(Math.random() * 300) + 2}; }
+  const type = it.kind === 'fig' ? 'MINIFIG' : 'PART';
+  const path = `/items/${type}/${encodeURIComponent(it.no)}/price`;
+  const params = {guide_type: 'sold', new_or_used: it.cond, currency_code: cur()};
+  if (it.kind === 'part' && it.color_id) params.color_id = it.color_id;
+  let d = await blGet(path, params);
+  if (d && +d.avg_price > 0) return {price: +d.avg_price, currency: d.currency_code, src: 'sold', sold_qty: d.total_quantity};
+  params.guide_type = 'stock';
+  d = await blGet(path, params);
+  if (d && +d.avg_price > 0) return {price: +d.avg_price, currency: d.currency_code, src: 'stock', sold_qty: 0};
+  return {price: null, currency: cur(), src: 'none', sold_qty: 0};
+}
+async function applyPrice(it) {
+  if (it.src === 'manual') return it;
+  if (!blReady()) { it.err = 'BrickLink nicht eingerichtet'; return it; }
+  try { Object.assign(it, await priceFor(it), {err: null, at: Date.now()}); }
+  catch (e) { it.err = e.message; }
+  return it;
+}
+const blLink = it => `https://www.bricklink.com/v2/catalog/catalogitem.page?${it.kind === 'fig' ? 'M' : 'P'}=${encodeURIComponent(it.no)}${it.kind === 'part' && it.color_id ? '&idColor=' + it.color_id : ''}#T=P`;
+const blImg = (kind, no, cid) => kind === 'fig' ? `https://img.bricklink.com/ItemImage/MN/0/${encodeURIComponent(no)}.png` : (cid ? `https://img.bricklink.com/ItemImage/PN/${cid}/${encodeURIComponent(no)}.png` : '');
+
+/* ================================================================ mock */
+function mockRecognize(kind) {
+  const svg = (t, c) => 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><rect x="10" y="26" width="60" height="40" rx="5" fill="${c}"/><rect x="18" y="16" width="14" height="12" rx="3" fill="${c}"/><rect x="48" y="16" width="14" height="12" rx="3" fill="${c}"/><text x="40" y="52" font-size="12" text-anchor="middle" fill="#fff" font-family="sans-serif">${t}</text></svg>`);
+  const c = kind === 'figs'
+    ? [['sw0001a','Battle Droid Tan with Back Plate',.93],['sw0001b','Battle Droid Tan without Back Plate',.71],['sw0299','Battle Droid Commander with Yellow Torso',.38]]
+    : [['3001','Brick 2 x 4',.96],['3003','Brick 2 x 2',.52],['3002','Brick 2 x 3',.41],['3010','Brick 1 x 4',.22]];
+  return sleep(700).then(() => c.map(([no, name, score], i) => ({no, name, score, img: svg(no, ['#D01012','#0055BF','#237841','#555'][i])})));
+}
+
+/* ================================================================ image prep */
+async function prep(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = url; });
+    const draw = (max, q) => { const s = Math.min(1, max / Math.max(img.width, img.height)); const c = document.createElement('canvas'); c.width = Math.round(img.width * s); c.height = Math.round(img.height * s); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); return c; };
+    const blob = await new Promise(r => draw(1280, .85).toBlob(r, 'image/jpeg', .85));
+    return {blob: blob || file, thumb: draw(180, .7).toDataURL('image/jpeg', .7)};
+  } catch (e) { return {blob: file, thumb: ''}; }
+  finally { URL.revokeObjectURL(url); }
+}
+
+/* ================================================================ render */
+function sums(kind) {
+  const its = S.items.filter(i => !kind || i.kind === kind);
+  return {n: its.reduce((a, i) => a + i.qty, 0), v: its.reduce((a, i) => a + (i.price || 0) * i.qty, 0), missing: its.filter(i => i.price == null).length};
+}
+function thumbHtml(it) {
+  const main = safeUrl(it.img) || safeUrl(it.img2) || safeUrl(it.photo);
+  const fb = [it.img2, it.photo].map(safeUrl).filter(u => u && u !== main);
+  return `<div class="thumb"><img src="${esc(main)}" alt="" loading="lazy" data-fb="${esc(fb.join(' '))}"></div>`;
+}
+function srcLabel(it) {
+  if (it.err && it.price == null) return `<small class="err">${esc(it.err)}</small>`;
+  return {sold: `<small>Ø verkauft${it.sold_qty ? ' · ' + esc(it.sold_qty) + '×' : ''}</small>`, stock: '<small>Ø Angebote</small>', manual: '<small>manuell</small>', none: '<small class="err">kein Preis</small>'}[it.src] || '';
+}
+function render() {
+  const a = sums(), f = sums('fig'), p = sums('part');
+  $('total').textContent = money(a.v);
+  $('totalSub').textContent = a.n ? `${f.n} Minifig${f.n === 1 ? '' : 's'} · ${p.n} Teil${p.n === 1 ? '' : 'e'}${a.missing ? ` · ${a.missing} ohne Preis` : ''}` : 'Noch nichts gescannt';
+  $('sum-fig').textContent = `${f.n} · ${money(f.v)}`;
+  $('sum-part').textContent = `${p.n} · ${money(p.v)}`;
+  for (const k of ['fig','part']) $('tab-' + k).setAttribute('aria-selected', String(tab === k));
+  $('scanLabel').textContent = tab === 'fig' ? 'Minifig scannen' : 'Teil scannen';
+  $('setupNote').hidden = blReady();
+  let its = S.items.filter(i => i.kind === tab);
+  if (sort === 'val') its = its.slice().sort((x, y) => (y.price || 0) * y.qty - (x.price || 0) * x.qty);
+  else if (sort === 'name') its = its.slice().sort((x, y) => x.name.localeCompare(y.name));
+  else its = its.slice().sort((x, y) => y.added - x.added);
+  $('list').innerHTML = its.length ? its.map(it => `<li><button class="item" data-uid="${esc(it.uid)}">
+      ${thumbHtml(it)}
+      <div><div class="nm">${esc(it.name)}</div>
+        <div class="meta"><span>${esc(it.no)}</span>${it.color_name ? `<span><i class="sw" style="background:#${esc(/^[0-9a-f]{6}$/i.test(it.color_rgb || '') ? it.color_rgb : 'ccc')}"></i>${esc(it.color_name)}</span>` : ''}<span>${it.cond === 'N' ? 'Neu' : 'Gebraucht'}</span>${it.qty > 1 ? `<span>${it.qty}× à ${money(it.price, it.currency, true)}</span>` : ''}</div></div>
+      <div class="pr"><b>${money(it.price == null ? null : it.price * it.qty, it.currency, true)}</b>${srcLabel(it)}</div>
+    </button></li>`).join('')
+    : `<li class="empty"><svg viewBox="0 0 120 80"><rect x="10" y="30" width="100" height="44" rx="6" fill="var(--card)" stroke="var(--line)" stroke-width="2"/><rect x="22" y="16" width="22" height="16" rx="4" fill="var(--y)"/><rect x="49" y="16" width="22" height="16" rx="4" fill="var(--y)"/><rect x="76" y="16" width="22" height="16" rx="4" fill="var(--y)"/></svg>
+       <p><b>Noch keine ${tab === 'fig' ? 'Minifiguren' : 'Teile'}</b></p><p>Tippe unten auf „${tab === 'fig' ? 'Minifig' : 'Teil'} scannen“. Am besten einzeln, auf hellem Untergrund.</p></li>`;
+}
+document.addEventListener('error', e => {
+  const t = e.target; if (t.tagName !== 'IMG') return;
+  const fb = (t.dataset.fb || '').split(' ').filter(Boolean);
+  if (fb.length) { t.src = fb.shift(); t.dataset.fb = fb.join(' '); } else t.style.visibility = 'hidden';
+}, true);
+
+/* ================================================================ sheets */
+const veil = $('veil'), sheet = $('sheet');
+function openSheet(html) { if (!veil.classList.contains('open')) $('toast').classList.remove('show'); sheet.innerHTML = '<div class="grab"></div>' + html; veil.classList.add('open'); sheet.scrollTop = 0; }
+function closeSheet() { veil.classList.remove('open'); sheet.innerHTML = ''; scan = null; }
+veil.addEventListener('click', e => { if (e.target === veil) closeSheet(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && veil.classList.contains('open')) closeSheet(); });
+
+/* ---------- scan flow */
+let scan = null;
+function pickFile(gallery) { const inp = $(gallery ? 'fileGal' : 'fileCam'); inp.value = ''; inp.click(); }
+$('btnScan').onclick = () => pickFile(false);
+$('btnGallery').onclick = () => pickFile(true);
+for (const id of ['fileCam','fileGal']) $(id).addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if (f) startScan(f); });
+
+async function startScan(file) {
+  const kind = tab;
+  scan = {kind, cands: [], sel: 0, cond: S.settings.cond || 'U', qty: 1, colors: null, color: '', manual: false, photo: ''};
+  const my = scan;
+  openSheet(`<h2>${kind === 'fig' ? 'Minifig' : 'Teil'} wird erkannt …</h2><div class="spin"></div><p class="center">Brickognize vergleicht dein Foto</p>`);
+  try {
+    const {blob, thumb} = await prep(file);
+    my.photo = thumb;
+    my.cands = await recognize(kind === 'fig' ? 'figs' : 'parts', blob);
+    if (scan !== my) return;
+    if (!my.cands.length) my.manual = true;
+    drawScan(); if (kind === 'part' && my.cands.length) loadColors();
+  } catch (e) {
+    if (scan !== my) return;
+    openSheet(`<h2>Das hat nicht geklappt</h2><p>${esc(e.message)}</p><div class="acts"><button class="btn pri" data-act="rescan">Nochmal scannen</button><button class="btn" data-act="manual">Nummer selbst eingeben</button><button class="btn" data-act="close">Abbrechen</button></div>`);
+  }
+}
+async function loadColors() {
+  const my = scan; if (!my || my.kind !== 'part') return;
+  const c = my.cands[my.sel]; if (!c) return;
+  my.colors = null; my.colorErr = ''; drawScan();
+  if (!blReady()) { my.colors = []; my.colorErr = 'Farben brauchen BrickLink-Schlüssel'; drawScan(); return; }
+  try { const cols = await knownColors(c.no); if (scan === my && my.cands[my.sel] === c) { my.colors = cols; if (!cols.some(x => String(x.id) === String(my.color))) my.color = ''; drawScan(); } }
+  catch (e) { if (scan === my) { my.colors = []; my.colorErr = e.message; drawScan(); } }
+}
+function drawScan() {
+  const s = scan; if (!s) return;
+  const isPart = s.kind === 'part';
+  const optsHtml = `<h3>Angaben</h3><div class="opts">
+      <label>Zustand<span class="seg"><button data-cond="U" aria-pressed="${s.cond === 'U'}">Gebraucht</button><button data-cond="N" aria-pressed="${s.cond === 'N'}">Neu</button></span></label>
+      <label>Anzahl<span class="step"><button data-q="-1" aria-label="weniger">−</button><input id="qty" inputmode="numeric" value="${s.qty}" aria-label="Anzahl"><button data-q="1" aria-label="mehr">+</button></span></label>
+      ${isPart && !s.manual ? `<label>Farbe${s.colors == null ? '<select disabled><option>Farben werden geladen …</option></select>'
+        : `<select id="color"><option value="">Alle Farben (Durchschnitt)</option>${s.colors.map(c => `<option value="${esc(c.id)}" ${String(c.id) === String(s.color) ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>`}</label>` : ''}
+    </div>${s.colorErr ? `<p class="center" style="font-size:13px;text-align:left">${esc(s.colorErr)}</p>` : ''}`;
+  if (s.manual) {
+    openSheet(`<h2>Nummer selbst eingeben</h2>
+      <label class="field">BrickLink-Nummer<input id="mNo" placeholder="${isPart ? 'z. B. 3001' : 'z. B. sw0001a'}" autocapitalize="off" autocomplete="off"></label>
+      <label class="field">Name (optional)<input id="mName" placeholder="${isPart ? 'Brick 2 x 4' : 'Battle Droid'}"></label>
+      ${isPart ? `<label class="field">Farb-ID (optional, BrickLink)<input id="mColor" inputmode="numeric" placeholder="z. B. 5 für Rot"></label>` : ''}
+      ${optsHtml.replace(/<label>Farbe[\s\S]*?<\/label>/, '')}
+      <div class="acts"><button class="btn pri" data-act="addManual">Zur Liste hinzufügen</button>${s.cands.length ? '<button class="btn" data-act="back">Zurück zu den Treffern</button>' : '<button class="btn" data-act="rescan">Nochmal scannen</button>'}</div>`);
+    return;
+  }
+  openSheet(`<div class="photo">${s.photo ? `<img src="${esc(s.photo)}" alt="Dein Foto">` : ''}<div><h2 style="margin:0">Ist es das richtige ${isPart ? 'Teil' : 'Minifig'}?</h2><p class="center" style="text-align:left;margin:4px 0 0;font-size:14px">Tippe auf den passenden Treffer.</p></div></div>
+    <div class="cands" role="radiogroup">${s.cands.map((c, i) => `<button class="cand" role="radio" aria-checked="${i === s.sel}" data-sel="${i}">
+        <div class="thumb"><img src="${esc(safeUrl(c.img))}" alt=""></div>
+        <div><div class="nm">${esc(c.name)}</div><div class="meta"><span>${esc(c.no)}</span>${c.category ? `<span>${esc(c.category)}</span>` : ''}</div><div class="meter"><i style="width:${Math.round((c.score || 0) * 100)}%;background:${c.score >= .7 ? 'var(--ok)' : c.score >= .4 ? 'var(--y2)' : 'var(--r)'}"></i></div></div>
+        <span class="score">${Math.round((c.score || 0) * 100)} %</span></button>`).join('')}</div>
+    <button class="link" data-act="manual">Nicht dabei? Nummer selbst eingeben</button>
+    ${optsHtml}
+    <div class="acts"><button class="btn pri" data-act="add">Ja, zur Liste hinzufügen</button><button class="btn" data-act="rescan">Nein, nochmal scannen</button></div>`);
+}
+async function addItem(base) {
+  const s = scan;
+  const it = Object.assign({uid: uid(), added: Date.now(), cond: s.cond, qty: s.qty, price: null, currency: cur(), src: 'none', photo: s.photo}, base);
+  it.img = blImg(it.kind, it.no, it.color_id) || it.img2 || '';
+  const btn = sheet.querySelector('[data-act^=add]'); if (btn) { btn.disabled = true; btn.textContent = 'Preis wird geholt …'; }
+  await applyPrice(it);
+  S.items.push(it); save();
+  tab = it.kind; closeSheet(); render();
+  toast(it.price != null ? `${it.name}: ${money(it.price * it.qty, it.currency, true)}` : `${it.name} hinzugefügt – ${it.err || 'kein Preis gefunden'}`);
+}
+
+/* ---------- item details */
+function openItem(u) {
+  const it = S.items.find(i => i.uid === u); if (!it) return;
+  openSheet(`<div class="photo">${thumbHtml(it).replace('class="thumb"', 'class="thumb" style="width:96px;height:96px"')}<div><h2 style="margin:0 0 4px">${esc(it.name)}</h2><div class="meta"><span>${esc(it.no)}</span>${it.color_name ? `<span>${esc(it.color_name)}</span>` : ''}</div></div></div>
+    <p style="margin:12px 0 0"><span class="big-price">${money(it.price == null ? null : it.price * it.qty, it.currency, true)}</span><br><span class="center" style="font-size:14px">${it.price != null ? `${money(it.price, it.currency, true)} pro Stück · ` : ''}${srcLabel(it).replace(/<\/?small[^>]*>/g, '')}</span></p>
+    <h3>Angaben</h3><div class="opts">
+      <label>Zustand<span class="seg"><button data-icond="U" aria-pressed="${it.cond === 'U'}">Gebraucht</button><button data-icond="N" aria-pressed="${it.cond === 'N'}">Neu</button></span></label>
+      <label>Anzahl<span class="step"><button data-iq="-1" aria-label="weniger">−</button><input id="iqty" inputmode="numeric" value="${it.qty}" aria-label="Anzahl"><button data-iq="1" aria-label="mehr">+</button></span></label>
+    </div>
+    <h3>Preis pro Stück selbst setzen</h3>
+    <div class="row"><label class="field" style="flex:1;margin:0"><input id="iprice" inputmode="decimal" placeholder="leer = BrickLink-Preis" value="${it.src === 'manual' ? esc(String(it.price).replace('.', ',')) : ''}" aria-label="Preis pro Stück"></label><button class="btn dark" data-iact="setprice" style="padding:0 16px;height:46px">Übernehmen</button></div>
+    <div class="acts">
+      <button class="btn" data-iact="reprice">BrickLink-Preis neu laden</button>
+      <a class="btn" style="display:grid;place-items:center;text-decoration:none;color:inherit" href="${esc(blLink(it))}" target="_blank" rel="noopener">Auf BrickLink ansehen</a>
+      <button class="btn del" data-iact="delete">Aus der Liste entfernen</button>
+    </div>`);
+  sheet.dataset.uid = u;
+}
+async function itemAction(act, el) {
+  const u = sheet.dataset.uid, it = S.items.find(i => i.uid === u); if (!it) return;
+  if (act === 'delete') {
+    const idx = S.items.indexOf(it); S.items.splice(idx, 1); save(); closeSheet(); render();
+    toast(`${it.name} entfernt`, () => { S.items.splice(idx, 0, it); save(); render(); });
+    return;
+  }
+  if (act === 'setprice') {
+    const raw = $('iprice').value.trim().replace(/\s|€/g, '').replace(',', '.');
+    if (raw === '') { it.src = 'none'; el.textContent = '…'; await applyPrice(it); }
+    else { const v = parseFloat(raw); if (isNaN(v) || v < 0) { toast('Bitte eine Zahl eingeben, z. B. 4,50'); return; } Object.assign(it, {price: v, src: 'manual', err: null, currency: cur()}); }
+  }
+  if (act === 'reprice') { it.src = 'none'; el.disabled = true; el.textContent = 'Lädt …'; await applyPrice(it); }
+  save(); render(); openItem(u);
+}
+
+/* ---------- settings */
+function openSettings() {
+  const st = S.settings;
+  openSheet(`<h2>Einstellungen</h2>
+    <div class="help"><b>BrickLink-Schlüssel bekommen</b><ol>
+      <li>Bei BrickLink anmelden. Die API gibt es nur für Verkäufer-Konten („Upgrade to Seller“, der Laden kann geschlossen bleiben).</li>
+      <li><a href="https://www.bricklink.com/v2/api/register_consumer.page" target="_blank" rel="noopener">API-Registrierung öffnen</a></li>
+      <li>Als IP-Adresse <b>0.0.0.0</b> und als Maske <b>0.0.0.0</b> eintragen – sonst klappt es am Handy nicht.</li>
+      <li>Die vier Werte unten eintragen.</li></ol></div>
+    <label class="field">Consumer Key<input id="sCk" value="${esc(st.ck)}" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+    <label class="field">Consumer Secret<input id="sCs" value="${esc(st.cs)}" type="password" autocomplete="off"></label>
+    <label class="field">Token Value<input id="sTk" value="${esc(st.tk)}" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+    <label class="field">Token Secret<input id="sTs" value="${esc(st.ts)}" type="password" autocomplete="off"></label>
+    <div class="opts" style="margin-bottom:6px">
+      <label>Währung<select id="sCur">${['EUR','USD','GBP','CHF','DKK','PLN','CZK','SEK'].map(c => `<option ${c === cur() ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
+      <label>Standard-Zustand<span class="seg"><button data-scond="U" aria-pressed="${st.cond !== 'N'}">Gebraucht</button><button data-scond="N" aria-pressed="${st.cond === 'N'}">Neu</button></span></label>
+    </div>
+    <p id="testOut" class="center" style="text-align:left;min-height:1.4em"></p>
+    <div class="acts">
+      <button class="btn pri" data-sact="save">Speichern</button>
+      <button class="btn" data-sact="test">Verbindung testen</button>
+      <button class="btn" data-sact="csv">Liste als CSV kopieren</button>
+      <button class="btn del" data-sact="wipe">Alle Einträge löschen</button>
+    </div>
+    <p class="center" style="font-size:13px;margin-top:14px">Erkennung: Brickognize · Preise: BrickLink Price Guide (Ø Verkäufe der letzten 6 Monate). Schlüssel und Liste bleiben nur auf diesem Gerät.</p>`);
+}
+function readSettings() {
+  const st = S.settings, oldCur = st.currency;
+  st.ck = $('sCk').value.trim(); st.cs = $('sCs').value.trim(); st.tk = $('sTk').value.trim(); st.ts = $('sTs').value.trim();
+  st.currency = $('sCur').value;
+  const b = sheet.querySelector('[data-scond][aria-pressed=true]'); st.cond = b ? b.dataset.scond : 'U';
+  save(); return oldCur !== st.currency;
+}
+async function settingsAction(act, el) {
+  if (act === 'save') { const curChanged = readSettings(); closeSheet(); render(); toast('Gespeichert'); if (curChanged && S.items.length) refreshAll(); return; }
+  if (act === 'test') {
+    readSettings(); const out = $('testOut');
+    if (!blReady()) { out.innerHTML = '<span class="bad">Bitte alle vier Werte eintragen.</span>'; return; }
+    out.textContent = 'Teste …';
+    try { S.colors = null; const c = await allColors(); out.innerHTML = `<span class="ok">Verbindung klappt – ${Object.keys(c).length} Farben geladen.</span>`; render(); }
+    catch (e) { out.innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+    return;
+  }
+  if (act === 'csv') {
+    const rows = [['Tab','BrickLink-Nr','Name','Farbe','Zustand','Anzahl','Preis/Stück','Summe','Währung','Quelle']]
+      .concat(S.items.map(i => [i.kind === 'fig' ? 'Minifigs' : 'Teile', i.no, i.name, i.color_name || '', i.cond === 'N' ? 'Neu' : 'Gebraucht', i.qty, (i.price ?? '') === '' ? '' : String(+i.price.toFixed(3)).replace('.', ','), i.price == null ? '' : (i.price * i.qty).toFixed(2).replace('.', ','), i.currency || cur(), i.src]));
+    const csv = rows.map(r => r.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(';')).join('\n');
+    try { await navigator.clipboard.writeText(csv); toast('CSV kopiert – in Tabelle einfügen'); } catch (e) { toast('Kopieren nicht erlaubt'); }
+    return;
+  }
+  if (act === 'wipe') {
+    if (el.dataset.sure !== '1') { el.dataset.sure = '1'; el.textContent = 'Wirklich alles löschen? Nochmal tippen'; return; }
+    const backup = S.items; S.items = []; save(); closeSheet(); render();
+    toast('Alle Einträge gelöscht', () => { S.items = backup; save(); render(); });
+  }
+}
+
+/* ---------- refresh all */
+let refreshing = false;
+async function refreshAll() {
+  if (refreshing) return;
+  if (!blReady()) { openSettings(); return; }
+  const todo = S.items.filter(i => i.src !== 'manual'); if (!todo.length) { toast('Nichts zu aktualisieren'); return; }
+  refreshing = true; const lab = $('btnRefresh').querySelector('span');
+  let n = 0, bad = 0;
+  for (const it of todo) { lab.textContent = `${++n}/${todo.length}`; it.src = 'none'; await applyPrice(it); if (it.err) bad++; render(); await sleep(120); }
+  save(); refreshing = false; lab.textContent = 'Preise neu'; render();
+  toast(bad ? `${todo.length - bad} aktualisiert, ${bad} mit Fehler` : 'Alle Preise aktualisiert');
+}
+
+/* ================================================================ events */
+for (const k of ['fig','part']) $('tab-' + k).onclick = () => { tab = k; try { localStorage.setItem(KEY + '.tab', k); } catch (e) {} render(); window.scrollTo({top: 0}); };
+$('sort').onchange = e => { sort = e.target.value; render(); };
+$('btnRefresh').onclick = refreshAll;
+$('btnSettings').onclick = openSettings;
+$('btnSetup').onclick = openSettings;
+$('list').addEventListener('click', e => { const b = e.target.closest('.item'); if (b) openItem(b.dataset.uid); });
+
+sheet.addEventListener('click', e => {
+  const t = e.target.closest('button'); if (!t) return;
+  const d = t.dataset;
+  if (d.act) {
+    const s = scan;
+    if (d.act === 'close') return closeSheet();
+    if (d.act === 'rescan') { const k = tab; closeSheet(); tab = k; return pickFile(false); }
+    if (d.act === 'manual') { if (!scan) scan = {kind: tab, cands: [], sel: 0, cond: S.settings.cond || 'U', qty: 1, photo: ''}; scan.manual = true; return drawScan(); }
+    if (d.act === 'back') { s.manual = false; drawScan(); if (s.kind === 'part' && s.colors == null) loadColors(); return; }
+    if (d.act === 'add') {
+      const c = s.cands[s.sel]; const col = s.color && S.colors ? S.colors[s.color] : null;
+      return addItem({kind: s.kind, no: c.no, name: c.name, img2: c.img, color_id: col ? col.id : null, color_name: col ? col.name : null, color_rgb: col ? col.rgb : null});
+    }
+    if (d.act === 'addManual') {
+      const no = $('mNo').value.trim(); if (!no) { $('mNo').focus(); return toast('Bitte BrickLink-Nummer eingeben'); }
+      const cid = s.kind === 'part' ? parseInt($('mColor').value, 10) || null : null; const col = cid && S.colors ? S.colors[cid] : null;
+      return addItem({kind: s.kind, no, name: $('mName').value.trim() || no, img2: '', color_id: cid, color_name: col ? col.name : (cid ? 'Farbe ' + cid : null), color_rgb: col ? col.rgb : null});
+    }
+  }
+  if (d.sel != null && scan) { const i = +d.sel; if (i !== scan.sel) { scan.sel = i; drawScan(); if (scan.kind === 'part') loadColors(); } return; }
+  if (d.cond && scan) { scan.cond = d.cond; return drawScan(); }
+  if (d.q && scan) { scan.qty = Math.max(1, (parseInt($('qty').value, 10) || 1) + +d.q); $('qty').value = scan.qty; return; }
+  if (d.iq || d.icond) {
+    const it = S.items.find(i => i.uid === sheet.dataset.uid); if (!it) return;
+    if (d.iq) { it.qty = Math.max(1, (parseInt($('iqty').value, 10) || 1) + +d.iq); save(); render(); return openItem(it.uid); }
+    if (d.icond !== it.cond) { it.cond = d.icond; t.parentNode.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b === t))); (async () => { await applyPrice(it); save(); render(); openItem(it.uid); })(); }
+    return;
+  }
+  if (d.iact) return itemAction(d.iact, t);
+  if (d.scond) { t.parentNode.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b === t))); return; }
+  if (d.sact) return settingsAction(d.sact, t);
+});
+sheet.addEventListener('change', e => {
+  if (e.target.id === 'color' && scan) scan.color = e.target.value;
+  if (e.target.id === 'qty' && scan) scan.qty = Math.max(1, parseInt(e.target.value, 10) || 1);
+  if (e.target.id === 'iqty') { const it = S.items.find(i => i.uid === sheet.dataset.uid); if (it) { it.qty = Math.max(1, parseInt(e.target.value, 10) || 1); save(); render(); openItem(it.uid); } }
+});
+
+render();
+if (!blReady() && !S.items.length) setTimeout(() => toast('Tipp: Erst BrickLink-Schlüssel in den Einstellungen eintragen'), 600);
+}
+</script>
+</body>
+</html>
