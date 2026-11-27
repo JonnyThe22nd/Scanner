@@ -7,6 +7,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(PriceViewPlugin.class);
+        registerPlugin(CameraIntentPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

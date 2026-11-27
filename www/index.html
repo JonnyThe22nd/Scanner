@@ -440,7 +440,22 @@ $('camShut').onclick = async () => {
   }, 'image/jpeg', .85);
 };
 document.addEventListener('visibilitychange', () => { if (document.hidden && camStream) stopCam(); });
-$('btnScan').onclick = openCam;
+
+/* Scannen: native System-Kamera (Blitz + Autofokus, Rückkamera). Sonst normale Kamera. */
+async function shoot() {
+  const Cam = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.RearCamera;
+  if (!(NATIVE && Cam)) return pickFile(false);
+  let res;
+  try { res = await Cam.shoot(); }
+  catch (e) { if (/cancel/i.test(String(e && (e.message || e)))) return; return pickFile(false); }
+  const path = res && res.path; if (!path) return;
+  try {
+    const url = window.Capacitor.convertFileSrc(path.startsWith('file://') ? path : 'file://' + path);
+    const blob = await (await fetch(url)).blob();
+    if (blob && blob.size) startScan(blob); else pickFile(false);
+  } catch (e) { toast('Foto konnte nicht geladen werden'); }
+}
+$('btnScan').onclick = shoot;
 $('btnGallery').onclick = () => pickFile(true);
 for (const id of ['fileCam','fileGal']) $(id).addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if (f) startScan(f); });
 
@@ -677,7 +692,7 @@ sheet.addEventListener('click', e => {
   if (d.act) {
     const s = scan;
     if (d.act === 'close') return closeSheet();
-    if (d.act === 'rescan') { const k = tab; closeSheet(); tab = k; return openCam(); }
+    if (d.act === 'rescan') { const k = tab; closeSheet(); tab = k; return shoot(); }
     if (d.act === 'manual') { if (!scan) scan = {kind: tab, cands: [], sel: 0, cond: S.settings.cond || 'U', qty: 1, photo: ''}; scan.manual = true; return drawScan(); }
     if (d.act === 'back') { s.manual = false; drawScan(); if (s.kind === 'part' && s.colors == null) loadColors(); return; }
     if (d.act === 'add') {
