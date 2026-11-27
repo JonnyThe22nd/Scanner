@@ -328,8 +328,7 @@ async function prep(file) {
 }
 
 /* ================================================================ render */
-const EXPENSIVE = 1.0; // ab diesem Stückpreis (in der gewählten Währung) ist die Farbe Pflicht
-const needsColor = it => it.kind === 'part' && !it.color_name && it.price != null && it.price >= EXPENSIVE;
+const needsColor = it => it.kind === 'part' && !it.color_name;
 // Gleiches Teil/Minifig erkennen: Art + Nummer + Farbe + Zustand
 const matchKey = it => [it.kind, String(it.no).toLowerCase().trim(), it.color_id || (it.color_name || '').toLowerCase().trim(), it.cond].join('|');
 function sums(kind) {
@@ -539,7 +538,7 @@ async function addItem(base) {
   S.items.push(it); save();
   tab = it.kind; closeSheet(); render();
   if (!blReady()) return openReader(it);
-  if (needsColor(it)) toast(`${it.name}: ${money(it.price * it.qty, it.currency, true)} – teuer, bitte Farbe wählen`);
+  if (needsColor(it)) toast(`${it.name}: ${money(it.price * it.qty, it.currency, true)} – bitte Farbe wählen`);
   else toast(it.price != null ? `${it.name}: ${money(it.price * it.qty, it.currency, true)}` : `${it.name} hinzugefügt – ${it.err || 'kein Preis gefunden'}`);
 }
 
@@ -665,7 +664,7 @@ function openReader(it) {
       <div class="rhead">${thumbHtml(it)}<div><div class="nm">${esc(it.name)}</div><div class="meta"><span>${esc(it.no)}</span>${it.color_name ? `<span>${esc(it.color_name)}</span>` : ''}<span>${used ? 'Gebraucht' : 'Neu'}</span>${it.qty > 1 ? `<span>${it.qty}×</span>` : ''}</div></div>
         <button class="icon-btn" id="rclose" aria-label="Schließen" style="margin:0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
       <p class="rhint">Bei <b>Past 6 Months Sales</b> in der Spalte <b>${used ? 'Used' : 'New'}</b> den Wert <b>Avg Price</b> ablesen${it.kind === 'part' && !it.color_name ? ' (oben zuerst die <b>Farbe</b> wählen)' : ''}. Preis pro Stück:</p>
-      ${it.kind === 'part' && !it.color_name ? `<label class="field" style="margin-bottom:10px">Farbe (bei teuren Teilen nötig)<input id="rcolor" placeholder="z. B. Rot" autocapitalize="words"></label>` : ''}
+      ${it.kind === 'part' && !it.color_name ? `<label class="field" style="margin-bottom:10px">Farbe (nötig)<input id="rcolor" placeholder="z. B. Rot" autocapitalize="words"></label>` : ''}
       <div class="rin"><input id="rprice" inputmode="decimal" placeholder="0,00" value="${it.price != null ? esc(String(+it.price.toFixed(3)).replace('.', ',')) : ''}" aria-label="Preis pro Stück in ${esc(cur())}"><button class="btn pri" id="rsave">Übernehmen</button></div>
       <div class="rfoot">${NATIVE ? '<button class="link" id="rreload">Seite neu laden</button>' : ''}<a href="${esc(url)}" target="_blank" rel="noopener" style="padding:10px 0">Im Browser öffnen</a></div>
       <p class="rhint" style="font-size:13px">Zeigt BrickLink US $ statt ${esc(cur())}? Melde dich im Fenster einmal bei BrickLink an, dann gilt deine Währung.</p>
@@ -691,10 +690,10 @@ reader.addEventListener('click', e => {
     if (v == null) { $('rprice').focus(); return toast('Bitte den Preis eintippen, z. B. 4,50'); }
     const colIn = $('rcolor');
     if (colIn) { const c = colIn.value.trim(); if (c) it.color_name = c; }
-    // Teures Teil ohne Farbe: Farbe verlangen
-    if (it.kind === 'part' && !it.color_name && v >= EXPENSIVE) {
+    // Teil ohne Farbe: Farbe verlangen
+    if (it.kind === 'part' && !it.color_name) {
       if (colIn) { colIn.focus(); colIn.style.borderColor = 'var(--r)'; }
-      return toast('Teures Teil – bitte zuerst die Farbe eintragen');
+      return toast('Bitte zuerst die Farbe eintragen');
     }
     // Zusammenführen, falls durch die Farbe jetzt ein gleicher Eintrag entsteht
     const twin = S.items.find(x => x.uid !== it.uid && matchKey(x) === matchKey(it));
@@ -744,6 +743,8 @@ sheet.addEventListener('click', e => {
     if (d.act === 'back') { s.manual = false; drawScan(); if (s.kind === 'part' && s.colors == null) loadColors(); return; }
     if (d.act === 'add') {
       const c = s.cands[s.sel]; const col = s.color && S.colors && blReady() ? S.colors[s.color] : null;
+      // Mit Schlüssel: Farbe für Teile Pflicht (ohne Schlüssel kommt sie gleich im Preis-Fenster)
+      if (blReady() && s.kind === 'part' && !col) { const sel = $('color'); if (sel) { sel.focus(); sel.style.borderColor = 'var(--r)'; } return toast('Bitte zuerst die Farbe wählen'); }
       return addItem({kind: s.kind, no: c.no, name: c.name, img2: c.img, color_id: col ? col.id : null, color_name: col ? col.name : (s.kind === 'part' && (s.colorTxt || '').trim() ? s.colorTxt.trim() : null), color_rgb: col ? col.rgb : null});
     }
     if (d.act === 'addManual') {
