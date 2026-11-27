@@ -380,13 +380,13 @@ document.addEventListener('keydown', e => { if (e.key !== 'Escape') return; if (
 let scan = null;
 function pickFile(gallery) { const inp = $(gallery ? 'fileGal' : 'fileCam'); inp.value = ''; inp.click(); }
 /* eigene Kamera: startet immer mit der Rückkamera */
-let camStream = null, torchOn = false;
+let camStream = null, torchOn = false, torchSupported = false;
 const camEl = $('cam'), camVideo = $('camVideo');
 function stopCam() { if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; } camVideo.srcObject = null; camEl.hidden = true; }
 async function openCam() {
   if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) return pickFile(false);
   $('camTitle').textContent = tab === 'fig' ? 'Minifig scannen' : 'Teil scannen';
-  $('camMsg').textContent = 'Kamera startet …'; $('camTorch').hidden = true; torchOn = false; $('camTorch').setAttribute('aria-pressed', 'false');
+  $('camMsg').textContent = 'Kamera startet …'; $('camTorch').hidden = true; torchOn = false; torchSupported = false; $('camTorch').setAttribute('aria-pressed', 'false');
   camEl.hidden = false;
   try {
     camStream = await navigator.mediaDevices.getUserMedia({audio: false, video: {facingMode: {ideal: 'environment'}, width: {ideal: 1920}, height: {ideal: 1440}}});
@@ -394,7 +394,13 @@ async function openCam() {
     camVideo.srcObject = camStream; await camVideo.play().catch(() => {});
     $('camMsg').textContent = '';
     const track = camStream.getVideoTracks()[0];
-    try { const caps = track.getCapabilities ? track.getCapabilities() : {}; $('camTorch').hidden = !caps.torch; } catch (e) {}
+    // Dauerhaft scharfstellen, wo das Handy es kann
+    try { await track.applyConstraints({advanced: [{focusMode: 'continuous'}]}); } catch (e) {}
+    try {
+      const caps = track.getCapabilities ? track.getCapabilities() : {};
+      torchSupported = !!caps.torch;
+      $('camTorch').hidden = !torchSupported;
+    } catch (e) {}
   } catch (e) {
     stopCam();
     toast('Kamera nicht verfügbar – öffne normale Kamera');
@@ -408,23 +414,43 @@ $('camTorch').onclick = async () => {
   torchOn = !torchOn;
   try { await track.applyConstraints({advanced: [{torch: torchOn}]}); $('camTorch').setAttribute('aria-pressed', String(torchOn)); } catch (e) { torchOn = false; }
 };
-$('camShut').onclick = () => {
+let capturing = false;
+$('camShut').onclick = async () => {
+  if (capturing) return;
   const w = camVideo.videoWidth, h = camVideo.videoHeight; if (!w || !h) return;
-  const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(camVideo, 0, 0, w, h);
-  c.toBlob(b => { stopCam(); if (b) startScan(b); }, 'image/jpeg', .92);
+  capturing = true;
+  const track = camStream && camStream.getVideoTracks()[0];
+  // Echter Blitz: Licht kurz an, belichten, auslösen, Licht aus
+  let flashed = false;
+  if (track && torchSupported && !torchOn) {
+    try { await track.applyConstraints({advanced: [{torch: true}]}); flashed = true; $('camShut').style.boxShadow = '0 0 0 4px #000, 0 0 60px 20px rgba(255,255,255,.9)'; await sleep(320); } catch (e) {}
+  }
+  // Direkt in Scangröße aufnehmen – spart das zweite Verkleinern, dadurch schneller
+  const max = 1280, sc = Math.min(1, max / Math.max(w, h));
+  const c = document.createElement('canvas'); c.width = Math.round(w * sc); c.height = Math.round(h * sc);
+  c.getContext('2d').drawImage(camVideo, 0, 0, c.width, c.height);
+  const ts = Math.min(1, 180 / Math.max(c.width, c.height));
+  const tc = document.createElement('canvas'); tc.width = Math.round(c.width * ts); tc.height = Math.round(c.height * ts);
+  tc.getContext('2d').drawImage(c, 0, 0, tc.width, tc.height);
+  const thumb = tc.toDataURL('image/jpeg', .7);
+  c.toBlob(b => {
+    if (flashed && track) track.applyConstraints({advanced: [{torch: false}]}).catch(() => {});
+    $('camShut').style.boxShadow = ''; capturing = false;
+    stopCam(); if (b) startScan(b, {blob: b, thumb});
+  }, 'image/jpeg', .85);
 };
 document.addEventListener('visibilitychange', () => { if (document.hidden && camStream) stopCam(); });
 $('btnScan').onclick = openCam;
 $('btnGallery').onclick = () => pickFile(true);
 for (const id of ['fileCam','fileGal']) $(id).addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if (f) startScan(f); });
 
-async function startScan(file) {
+async function startScan(file, pre) {
   const kind = tab;
   scan = {kind, cands: [], sel: 0, cond: S.settings.cond || 'U', qty: 1, colors: null, color: '', manual: false, photo: ''};
   const my = scan;
   openSheet(`<h2>${kind === 'fig' ? 'Minifig' : 'Teil'} wird erkannt …</h2><div class="spin"></div><p class="center">Brickognize vergleicht dein Foto</p>`);
   try {
-    const {blob, thumb} = await prep(file);
+    const {blob, thumb} = pre || await prep(file);
     my.photo = thumb;
     my.cands = await recognize(kind === 'fig' ? 'figs' : 'parts', blob);
     if (scan !== my) return;
