@@ -110,6 +110,7 @@ a{color:var(--r)}
 .toast.show{display:flex}
 .toast button{margin-left:auto;border:0;background:var(--y);color:#1a1a1a;border-radius:9px;padding:8px 12px;font-weight:700;flex:none}
 .ok{color:var(--ok)}.bad{color:var(--r)}
+.warnchip{background:light-dark(#ffe1c2,#3a2410);color:var(--warn);font-weight:700;border-radius:6px;padding:1px 7px}
 .cam{position:fixed;inset:0;z-index:50;background:#000;color:#fff;display:flex;flex-direction:column}
 .cam video{flex:1;min-height:0;width:100%;object-fit:cover;background:#000}
 .cam .guide{position:absolute;left:50%;top:45%;width:min(70vw,62vh);aspect-ratio:1;transform:translate(-50%,-50%);border:3px solid rgba(255,207,0,.9);border-radius:24px;box-shadow:0 0 0 100vmax rgba(0,0,0,.28);pointer-events:none}
@@ -144,7 +145,7 @@ a{color:var(--r)}
     <div class="brand"><svg class="stud" viewBox="0 0 24 24"><rect x="1" y="7" width="22" height="15" rx="2.5" fill="#D01012"/><rect x="4" y="2.5" width="6" height="5.5" rx="1.2" fill="#D01012"/><rect x="14" y="2.5" width="6" height="5.5" rx="1.2" fill="#D01012"/><rect x="1" y="7" width="22" height="3" fill="#A80C0E"/></svg>BrickScan</div>
     <button class="icon-btn" id="btnSettings" aria-label="Einstellungen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
   </div>
-  <div class="total"><small>Gesamtwert (Ø BrickLink-Verkäufe)</small><b id="total">0,00 €</b><span id="totalSub">Noch nichts gescannt</span></div>
+  <div class="total"><small id="totalLabel">Minifigs gesamt</small><b id="total">0,00 €</b><span id="totalSub">Noch nichts gescannt</span></div>
   <div class="tabs" role="tablist">
     <button class="tab" role="tab" id="tab-fig" aria-selected="true">Minifigs<em id="sum-fig">0 · 0,00 €</em></button>
     <button class="tab" role="tab" id="tab-part" aria-selected="false">Teile<em id="sum-part">0 · 0,00 €</em></button>
@@ -327,6 +328,10 @@ async function prep(file) {
 }
 
 /* ================================================================ render */
+const EXPENSIVE = 1.0; // ab diesem Stückpreis (in der gewählten Währung) ist die Farbe Pflicht
+const needsColor = it => it.kind === 'part' && !it.color_name && it.price != null && it.price >= EXPENSIVE;
+// Gleiches Teil/Minifig erkennen: Art + Nummer + Farbe + Zustand
+const matchKey = it => [it.kind, String(it.no).toLowerCase().trim(), it.color_id || (it.color_name || '').toLowerCase().trim(), it.cond].join('|');
 function sums(kind) {
   const its = S.items.filter(i => !kind || i.kind === kind);
   return {n: its.reduce((a, i) => a + i.qty, 0), v: its.reduce((a, i) => a + (i.price || 0) * i.qty, 0), missing: its.filter(i => i.price == null).length};
@@ -341,9 +346,13 @@ function srcLabel(it) {
   return {sold: `<small>Ø verkauft${it.sold_qty ? ' · ' + esc(it.sold_qty) + '×' : ''}</small>`, stock: '<small>Ø Angebote</small>', manual: '<small>abgelesen</small>', none: '<small class="err">Preis fehlt</small>'}[it.src] || '';
 }
 function render() {
-  const a = sums(), f = sums('fig'), p = sums('part');
-  $('total').textContent = money(a.v);
-  $('totalSub').textContent = a.n ? `${f.n} Minifig${f.n === 1 ? '' : 's'} · ${p.n} Teil${p.n === 1 ? '' : 'e'}${a.missing ? ` · ${a.missing} ohne Preis` : ''}` : 'Noch nichts gescannt';
+  const f = sums('fig'), p = sums('part'), act = tab === 'fig' ? f : p;
+  // Getrennte Summe je Tab – oben steht immer der gerade geöffnete Tab
+  $('totalLabel').textContent = tab === 'fig' ? 'Minifigs gesamt' : 'Teile gesamt';
+  $('total').textContent = money(act.v);
+  $('totalSub').textContent = act.n
+    ? `${act.n} ${tab === 'fig' ? (act.n === 1 ? 'Minifig' : 'Minifigs') : (act.n === 1 ? 'Teil' : 'Teile')}${act.missing ? ` · ${act.missing} ohne Preis` : ''}`
+    : (tab === 'fig' ? 'Noch keine Minifigs' : 'Noch keine Teile');
   $('sum-fig').textContent = `${f.n} · ${money(f.v)}`;
   $('sum-part').textContent = `${p.n} · ${money(p.v)}`;
   for (const k of ['fig','part']) $('tab-' + k).setAttribute('aria-selected', String(tab === k));
@@ -357,7 +366,7 @@ function render() {
   $('list').innerHTML = its.length ? its.map(it => `<li><button class="item" data-uid="${esc(it.uid)}">
       ${thumbHtml(it)}
       <div><div class="nm">${esc(it.name)}</div>
-        <div class="meta"><span>${esc(it.no)}</span>${it.color_name ? `<span>${/^[0-9a-f]{6}$/i.test(it.color_rgb || '') ? `<i class="sw" style="background:#${esc(it.color_rgb)}"></i>` : ''}${esc(it.color_name)}</span>` : ''}<span>${it.cond === 'N' ? 'Neu' : 'Gebraucht'}</span>${it.qty > 1 ? `<span>${it.qty}× à ${money(it.price, it.currency, true)}</span>` : ''}</div></div>
+        <div class="meta"><span>${esc(it.no)}</span>${it.color_name ? `<span>${/^[0-9a-f]{6}$/i.test(it.color_rgb || '') ? `<i class="sw" style="background:#${esc(it.color_rgb)}"></i>` : ''}${esc(it.color_name)}</span>` : ''}<span>${it.cond === 'N' ? 'Neu' : 'Gebraucht'}</span>${it.qty > 1 ? `<span>${it.qty}× à ${money(it.price, it.currency, true)}</span>` : ''}${needsColor(it) ? '<span class="warnchip">Farbe fehlt</span>' : ''}</div></div>
       <div class="pr"><b>${money(it.price == null ? null : it.price * it.qty, it.currency, true)}</b>${srcLabel(it)}</div>
     </button></li>`).join('')
     : `<li class="empty"><svg viewBox="0 0 120 80"><rect x="10" y="30" width="100" height="44" rx="6" fill="var(--card)" stroke="var(--line)" stroke-width="2"/><rect x="22" y="16" width="22" height="16" rx="4" fill="var(--y)"/><rect x="49" y="16" width="22" height="16" rx="4" fill="var(--y)"/><rect x="76" y="16" width="22" height="16" rx="4" fill="var(--y)"/></svg>
@@ -516,12 +525,22 @@ async function addItem(base) {
   const s = scan;
   const it = Object.assign({uid: uid(), added: Date.now(), cond: s.cond, qty: s.qty, price: null, currency: cur(), src: 'none', photo: s.photo}, base);
   it.img = blImg(it.kind, it.no, it.color_id) || it.img2 || '';
+  // Schon vorhanden? Dann Anzahl erhöhen statt neuen Eintrag anlegen
+  const dup = S.items.find(x => matchKey(x) === matchKey(it));
+  if (dup) {
+    dup.qty += it.qty; dup.added = Date.now(); save();
+    tab = dup.kind; closeSheet(); render();
+    if (!blReady() && dup.price == null) return openReader(dup);
+    toast(`Schon in der Liste – jetzt ${dup.qty}× (${money((dup.price || 0) * dup.qty, dup.currency, true)})`);
+    return;
+  }
   const btn = sheet.querySelector('[data-act^=add]'); if (btn) { btn.disabled = true; btn.textContent = 'Preis wird geholt …'; }
   await applyPrice(it);
   S.items.push(it); save();
   tab = it.kind; closeSheet(); render();
   if (!blReady()) return openReader(it);
-  toast(it.price != null ? `${it.name}: ${money(it.price * it.qty, it.currency, true)}` : `${it.name} hinzugefügt – ${it.err || 'kein Preis gefunden'}`);
+  if (needsColor(it)) toast(`${it.name}: ${money(it.price * it.qty, it.currency, true)} – teuer, bitte Farbe wählen`);
+  else toast(it.price != null ? `${it.name}: ${money(it.price * it.qty, it.currency, true)}` : `${it.name} hinzugefügt – ${it.err || 'kein Preis gefunden'}`);
 }
 
 /* ---------- item details */
@@ -535,6 +554,8 @@ function openItem(u) {
     </div>
     <h3>Preis pro Stück selbst setzen</h3>
     <div class="row"><label class="field" style="flex:1;margin:0"><input id="iprice" inputmode="decimal" placeholder="${blReady() ? 'leer = BrickLink-Preis' : 'z. B. 4,50'}" value="${it.src === 'manual' ? esc(String(it.price).replace('.', ',')) : ''}" aria-label="Preis pro Stück"></label><button class="btn dark" data-iact="setprice" style="padding:0 16px;height:46px">Übernehmen</button></div>
+    ${it.kind === 'part' ? `<h3>Farbe${needsColor(it) ? ' <span class="warnchip">fehlt</span>' : ''}</h3>
+    <div class="row"><label class="field" style="flex:1;margin:0"><input id="icolor" placeholder="z. B. Rot" autocapitalize="words" value="${esc(it.color_name || '')}" aria-label="Farbe"></label><button class="btn dark" data-iact="setcolor" style="padding:0 16px;height:46px">Speichern</button></div>` : ''}
     <div class="acts">
       <button class="btn dark" data-iact="read">Preis auf BrickLink ablesen</button>
       ${blReady() ? '<button class="btn" data-iact="reprice">BrickLink-Preis automatisch laden</button>' : ''}
@@ -557,6 +578,15 @@ async function itemAction(act, el) {
     else { const v = parseFloat(raw); if (isNaN(v) || v < 0) { toast('Bitte eine Zahl eingeben, z. B. 4,50'); return; } Object.assign(it, {price: v, src: 'manual', err: null, currency: cur()}); }
   }
   if (act === 'reprice') { it.src = 'none'; el.disabled = true; el.textContent = 'Lädt …'; await applyPrice(it); }
+  if (act === 'setcolor') {
+    it.color_name = $('icolor').value.trim() || null;
+    const twin = S.items.find(x => x.uid !== it.uid && matchKey(x) === matchKey(it));
+    if (twin) {
+      twin.qty += it.qty; S.items = S.items.filter(x => x.uid !== it.uid);
+      save(); closeSheet(); render(); toast(`Mit vorhandenem Eintrag zusammengefasst – ${twin.qty}×`);
+      return;
+    }
+  }
   save(); render(); openItem(u);
 }
 
@@ -634,7 +664,8 @@ function openReader(it) {
     <div class="rpanel">
       <div class="rhead">${thumbHtml(it)}<div><div class="nm">${esc(it.name)}</div><div class="meta"><span>${esc(it.no)}</span>${it.color_name ? `<span>${esc(it.color_name)}</span>` : ''}<span>${used ? 'Gebraucht' : 'Neu'}</span>${it.qty > 1 ? `<span>${it.qty}×</span>` : ''}</div></div>
         <button class="icon-btn" id="rclose" aria-label="Schließen" style="margin:0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
-      <p class="rhint">Bei <b>Past 6 Months Sales</b> in der Spalte <b>${used ? 'Used' : 'New'}</b> den Wert <b>Avg Price</b> ablesen${it.kind === 'part' && !it.color_id ? ' (oben zuerst die <b>Farbe</b> wählen)' : ''}. Preis pro Stück:</p>
+      <p class="rhint">Bei <b>Past 6 Months Sales</b> in der Spalte <b>${used ? 'Used' : 'New'}</b> den Wert <b>Avg Price</b> ablesen${it.kind === 'part' && !it.color_name ? ' (oben zuerst die <b>Farbe</b> wählen)' : ''}. Preis pro Stück:</p>
+      ${it.kind === 'part' && !it.color_name ? `<label class="field" style="margin-bottom:10px">Farbe (bei teuren Teilen nötig)<input id="rcolor" placeholder="z. B. Rot" autocapitalize="words"></label>` : ''}
       <div class="rin"><input id="rprice" inputmode="decimal" placeholder="0,00" value="${it.price != null ? esc(String(+it.price.toFixed(3)).replace('.', ',')) : ''}" aria-label="Preis pro Stück in ${esc(cur())}"><button class="btn pri" id="rsave">Übernehmen</button></div>
       <div class="rfoot">${NATIVE ? '<button class="link" id="rreload">Seite neu laden</button>' : ''}<a href="${esc(url)}" target="_blank" rel="noopener" style="padding:10px 0">Im Browser öffnen</a></div>
       <p class="rhint" style="font-size:13px">Zeigt BrickLink US $ statt ${esc(cur())}? Melde dich im Fenster einmal bei BrickLink an, dann gilt deine Währung.</p>
@@ -658,6 +689,22 @@ reader.addEventListener('click', e => {
   if (t.id === 'rsave') {
     const it = readerItem, v = parsePrice($('rprice').value);
     if (v == null) { $('rprice').focus(); return toast('Bitte den Preis eintippen, z. B. 4,50'); }
+    const colIn = $('rcolor');
+    if (colIn) { const c = colIn.value.trim(); if (c) it.color_name = c; }
+    // Teures Teil ohne Farbe: Farbe verlangen
+    if (it.kind === 'part' && !it.color_name && v >= EXPENSIVE) {
+      if (colIn) { colIn.focus(); colIn.style.borderColor = 'var(--r)'; }
+      return toast('Teures Teil – bitte zuerst die Farbe eintragen');
+    }
+    // Zusammenführen, falls durch die Farbe jetzt ein gleicher Eintrag entsteht
+    const twin = S.items.find(x => x.uid !== it.uid && matchKey(x) === matchKey(it));
+    if (twin) {
+      twin.qty += it.qty; twin.price = v; twin.src = 'manual'; twin.err = null; twin.currency = cur();
+      S.items = S.items.filter(x => x.uid !== it.uid);
+      save(); closeReader(); render();
+      toast(`Mit vorhandenem Eintrag zusammengefasst – ${twin.qty}×`);
+      return;
+    }
     Object.assign(it, {price: v, src: 'manual', err: null, currency: cur(), at: Date.now()});
     save(); closeReader(); render();
     toast(`${it.name}: ${money(v * it.qty, it.currency, true)}`);
@@ -725,6 +772,18 @@ sheet.addEventListener('change', e => {
   if (e.target.id === 'qty' && scan) scan.qty = Math.max(1, parseInt(e.target.value, 10) || 1);
   if (e.target.id === 'iqty') { const it = S.items.find(i => i.uid === sheet.dataset.uid); if (it) { it.qty = Math.max(1, parseInt(e.target.value, 10) || 1); save(); render(); openItem(it.uid); } }
 });
+
+/* Zurück-Taste des Handys: schließt zuerst offene Fenster, statt die App zu beenden */
+const App = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
+if (App && App.addListener) {
+  App.addListener('backButton', () => {
+    if (!$('reader').hidden) { closeReader(); return; }      // Preis-Fenster
+    if (!camEl.hidden) { stopCam(); return; }                 // (falls doch Kamera-Overlay)
+    if (veil.classList.contains('open')) { closeSheet(); return; } // Eingabe-/Detail-Fenster
+    if (tab !== 'fig') { tab = 'fig'; try { localStorage.setItem(KEY + '.tab', 'fig'); } catch (e) {} render(); return; }
+    App.exitApp();
+  });
+}
 
 render();
 }
