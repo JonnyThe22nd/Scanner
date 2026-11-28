@@ -123,6 +123,13 @@ a{color:var(--r)}
 .setrow .bar2{height:6px;border-radius:3px;background:var(--line);margin-top:6px;overflow:hidden}
 .setrow .bar2 i{display:block;height:100%}
 .fnote{font-size:14px;color:var(--mut);background:var(--card);border-radius:12px;padding:12px 14px;margin:4px 0 14px}
+.mgrid{display:grid;gap:8px;margin:6px 0 4px}
+.mrow{display:grid;grid-template-columns:56px minmax(0,1fr) 28px;gap:10px;align-items:center;padding:8px;border-radius:12px;background:var(--card)}
+.mrow.off{opacity:.45}
+.mthumb{width:56px;height:56px;border-radius:9px;background:#fff;object-fit:contain}
+.mrow select,.mrow .mc,.mrow .mq{height:38px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font-size:14px;padding:0 8px;width:100%}
+.mrow .mline{display:grid;grid-template-columns:1fr 64px;gap:6px;margin-top:6px}
+.mrow .minc{width:24px;height:24px}
 .cam{position:fixed;inset:0;z-index:50;background:#000;color:#fff;display:flex;flex-direction:column}
 .cam video{flex:1;min-height:0;width:100%;object-fit:cover;background:#000}
 .cam .guide{position:absolute;left:50%;top:45%;width:min(70vw,62vh);aspect-ratio:1;transform:translate(-50%,-50%);border:3px solid rgba(255,207,0,.9);border-radius:24px;box-shadow:0 0 0 100vmax rgba(0,0,0,.28);pointer-events:none}
@@ -173,6 +180,7 @@ a{color:var(--r)}
     <option value="name">Name A–Z</option>
   </select>
   <button class="chip" id="btnBulk" aria-pressed="false"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg><span>Schnell-Scan</span></button>
+  <button class="chip" id="btnMulti" aria-pressed="false"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span>Multi-Foto</span></button>
   <button class="chip" id="btnFinder" hidden><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><path d="M3 8.5 12 4l9 4.5-9 4.5z"/><path d="M3 8.5v7L12 20l9-4.5v-7"/><path d="M12 13v7"/></svg><span>Sets finden</span></button>
   <button class="chip" id="btnRefresh"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg><span>Preise neu</span></button>
 </div>
@@ -185,6 +193,7 @@ a{color:var(--r)}
 </div>
 <input type="file" id="fileCam" accept="image/*" capture="environment" hidden>
 <input type="file" id="fileGal" accept="image/*" hidden>
+<input type="file" id="fileMulti" accept="image/*" capture="environment" hidden>
 
 <div class="veil" id="veil"><div class="sheet" id="sheet" role="dialog" aria-modal="true"></div></div>
 <div class="finder" id="finder" hidden></div>
@@ -206,7 +215,7 @@ const MOCK = /[?&]mock/.test(location.search);
 const CAP = window.Capacitor;
 const NATIVE = !!(CAP && CAP.nativePromise && CAP.getPlatform && CAP.getPlatform() !== 'web');
 const nativeCall = (m, o) => NATIVE ? CAP.nativePromise('PriceView', m, o || {}) : Promise.resolve();
-const blank = () => ({items: [], settings: {ck:'', cs:'', tk:'', ts:'', currency:'EUR', cond:'U'}, colors: null});
+const blank = () => ({items: [], settings: {ck:'', cs:'', tk:'', ts:'', rb:'', currency:'EUR', cond:'U'}, colors: null, rbColors: null, rbParts: {}});
 let S = blank();
 try { const raw = localStorage.getItem(KEY); if (raw) S = Object.assign(blank(), JSON.parse(raw)); S.settings = Object.assign(blank().settings, S.settings); } catch (e) {}
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast('Speichern fehlgeschlagen – Speicher voll?'); } };
@@ -321,6 +330,45 @@ async function applyPrice(it) {
 const blLink = it => `https://www.bricklink.com/v2/catalog/catalogitem.page?${it.kind === 'fig' ? 'M' : 'P'}=${encodeURIComponent(it.no)}${it.kind === 'part' && it.color_id ? '&idColor=' + it.color_id : ''}#T=P`;
 const blImg = (kind, no, cid) => kind === 'fig' ? `https://img.bricklink.com/ItemImage/MN/0/${encodeURIComponent(no)}.png` : (cid ? `https://img.bricklink.com/ItemImage/PN/${cid}/${encodeURIComponent(no)}.png` : '');
 
+/* ---------- Rebrickable (für Set-Suche ohne BrickLink; kostenloser Schlüssel) */
+const RB = 'https://rebrickable.com/api/v3/lego';
+const rbReady = () => (MOCK && /[?&]rb\b/.test(location.search)) || (S.settings.rb || '').trim().length >= 10;
+async function rbGet(path, params = {}) {
+  const p = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null && v !== '').map(([k, v]) => [k, String(v)])).toString();
+  let res;
+  try { res = await fetch(RB + path + (p ? '?' + p : ''), {headers: {Authorization: 'key ' + (S.settings.rb || '').trim(), Accept: 'application/json'}}); }
+  catch (e) { throw new Error('Keine Verbindung zu Rebrickable'); }
+  if (res.status === 401 || res.status === 403) throw new Error('Rebrickable lehnt den Schlüssel ab');
+  if (res.status === 429) throw new Error('Rebrickable: zu viele Anfragen – kurz warten');
+  if (res.status === 404) { const e = new Error('nicht gefunden'); e.notfound = true; throw e; }
+  if (!res.ok) throw new Error('Rebrickable ' + res.status);
+  return res.json();
+}
+async function rbColorMap() {
+  if (S.rbColors) return S.rbColors;
+  const map = {};
+  if (MOCK) { Object.assign(map, {5: 4, 11: 0, 1: 15, 86: 71, 3: 14}); }
+  else { const d = await rbGet('/colors/', {page_size: 1000}); for (const c of d.results || []) { const bl = c.external_ids && c.external_ids.BrickLink && c.external_ids.BrickLink.ext_ids; if (bl) for (const id of bl) map[id] = c.id; } }
+  S.rbColors = map; save(); return map;
+}
+async function rbPartNum(blNo) {
+  if (S.rbParts[blNo] !== undefined) return S.rbParts[blNo];
+  let pn = MOCK ? String(blNo) : null;
+  if (!MOCK) try { const d = await rbGet('/parts/', {bricklink_id: blNo, page_size: 1}); pn = (d.results && d.results[0] && d.results[0].part_num) || null; } catch (e) { if (!e.notfound) throw e; }
+  S.rbParts[blNo] = pn; save(); return pn;
+}
+async function rbPartSets(partNum, rbColor) {
+  if (MOCK) { await sleep(60); return [{set_num: '8360-1', set_name: 'Schwebejet', set_img_url: ''}, {set_num: '10001-1', set_name: 'Großes Set', set_img_url: ''}]; }
+  const d = await rbGet(`/parts/${encodeURIComponent(partNum)}/colors/${rbColor}/sets/`, {page_size: 1000});
+  return d.results || [];
+}
+async function rbSetParts(setNum) {
+  if (MOCK) { await sleep(60); const ps = S.items.filter(i => i.kind === 'part' && i.color_id).slice(0, 3).map(it => ({part: {part_num: String(it.no)}, color: {id: (S.rbColors || {})[it.color_id] || 0}, quantity: 2, is_spare: false})); ps.push({part: {part_num: '9999'}, color: {id: 1}, quantity: 5, is_spare: false}); return ps; }
+  let parts = [];
+  for (let page = 1; page <= 6; page++) { const d = await rbGet(`/sets/${encodeURIComponent(setNum)}/parts/`, {page_size: 1000, page}); parts = parts.concat(d.results || []); if (!d.next) break; await sleep(200); }
+  return parts;
+}
+
 /* ================================================================ mock */
 function mockRecognize(kind) {
   const svg = (t, c) => 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><rect x="10" y="26" width="60" height="40" rx="5" fill="${c}"/><rect x="18" y="16" width="14" height="12" rx="3" fill="${c}"/><rect x="48" y="16" width="14" height="12" rx="3" fill="${c}"/><text x="40" y="52" font-size="12" text-anchor="middle" fill="#fff" font-family="sans-serif">${t}</text></svg>`);
@@ -370,10 +418,10 @@ function render() {
   $('sum-fig').textContent = `${f.n} · ${money(f.v)}`;
   $('sum-part').textContent = `${p.n} · ${money(p.v)}`;
   for (const k of ['fig','part']) $('tab-' + k).setAttribute('aria-selected', String(tab === k));
-  $('scanLabel').textContent = (typeof bulk !== 'undefined' && bulk) ? 'Schnell-Scan' : (tab === 'fig' ? 'Minifig scannen' : 'Teil scannen');
+  $('scanLabel').textContent = (typeof scanLabelText === 'function') ? scanLabelText() : (tab === 'fig' ? 'Minifig scannen' : 'Teil scannen');
   $('setupNote').hidden = blReady();
   $('btnRefresh').hidden = !blReady();
-  $('btnFinder').hidden = !blReady() || !S.items.length;
+  $('btnFinder').hidden = !(blReady() || rbReady()) || !S.items.length;
   let its = S.items.filter(i => i.kind === tab);
   if (sort === 'val') its = its.slice().sort((x, y) => (y.price || 0) * y.qty - (x.price || 0) * x.qty);
   else if (sort === 'name') its = its.slice().sort((x, y) => x.name.localeCompare(y.name));
@@ -508,14 +556,118 @@ async function bulkShoot() {
   } finally { bulkRunning = false; if (added) toast(`Schnell-Scan beendet – ${added} erfasst`); }
 }
 function short(e) { const m = String(e && (e.message || e)); return m.length > 80 ? m.slice(0, 80) : m; }
-$('btnScan').onclick = () => bulk ? bulkShoot() : shoot();
+$('btnScan').onclick = () => multi ? multiShoot() : (bulk ? bulkShoot() : shoot());
 $('btnGallery').onclick = () => pickFile(true);
 for (const id of ['fileCam','fileGal']) $(id).addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if (f) startScan(f); });
-let bulk = false;
-try { bulk = localStorage.getItem(KEY + '.bulk') === '1'; } catch (e) {}
-function setBulk(v) { bulk = v; try { localStorage.setItem(KEY + '.bulk', v ? '1' : '0'); } catch (e) {} $('btnBulk').setAttribute('aria-pressed', String(v)); $('scanLabel').textContent = v ? 'Schnell-Scan' : (tab === 'fig' ? 'Minifig scannen' : 'Teil scannen'); }
+let bulk = false, multi = false;
+try { bulk = localStorage.getItem(KEY + '.bulk') === '1'; multi = localStorage.getItem(KEY + '.multi') === '1'; } catch (e) {}
+function scanLabelText() { return multi ? 'Multi-Foto' : (bulk ? 'Schnell-Scan' : (tab === 'fig' ? 'Minifig scannen' : 'Teil scannen')); }
+function setBulk(v) { bulk = v; if (v) { multi = false; try { localStorage.setItem(KEY + '.multi', '0'); } catch (e) {} $('btnMulti').setAttribute('aria-pressed', 'false'); } try { localStorage.setItem(KEY + '.bulk', v ? '1' : '0'); } catch (e) {} $('btnBulk').setAttribute('aria-pressed', String(v)); $('scanLabel').textContent = scanLabelText(); }
+function setMulti(v) { multi = v; if (v) { bulk = false; try { localStorage.setItem(KEY + '.bulk', '0'); } catch (e) {} $('btnBulk').setAttribute('aria-pressed', 'false'); } try { localStorage.setItem(KEY + '.multi', v ? '1' : '0'); } catch (e) {} $('btnMulti').setAttribute('aria-pressed', String(v)); $('scanLabel').textContent = scanLabelText(); }
 $('btnBulk').onclick = () => setBulk(!bulk);
-setBulk(bulk);
+$('btnMulti').onclick = () => setMulti(!multi);
+setBulk(bulk); setMulti(multi);
+
+/* ---------- Multi-Foto: mehrere Teile auf hellem Untergrund, ausschneiden und je erkennen */
+function loadImg(url) { return new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = url; }); }
+function pickImage() { return new Promise(res => { const inp = $('fileMulti'); const h = () => { inp.removeEventListener('change', h); res((inp.files && inp.files[0]) || null); }; inp.value = ''; inp.addEventListener('change', h); inp.click(); }); }
+async function segment(blob) {
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = await loadImg(url);
+    const W = img.width, H = img.height, scale = Math.min(1, 900 / Math.max(W, H));
+    const w = Math.max(1, Math.round(W * scale)), h = Math.max(1, Math.round(H * scale));
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const ctx = c.getContext('2d', {willReadFrequently: true}); ctx.drawImage(img, 0, 0, w, h);
+    const data = ctx.getImageData(0, 0, w, h).data;
+    const med = arr => { arr.sort((a, b) => a - b); return arr[arr.length >> 1] || 0; };
+    const bR = [], bG = [], bB = [], step = Math.max(1, Math.floor((w + h) / 240));
+    const at = (x, y) => (y * w + x) * 4;
+    for (let x = 0; x < w; x += step) { for (const y of [0, h - 1]) { const i = at(x, y); bR.push(data[i]); bG.push(data[i + 1]); bB.push(data[i + 2]); } }
+    for (let y = 0; y < h; y += step) { for (const x of [0, w - 1]) { const i = at(x, y); bR.push(data[i]); bG.push(data[i + 1]); bB.push(data[i + 2]); } }
+    const br = med(bR), bg = med(bG), bb = med(bB);
+    const N = w * h, mask = new Uint8Array(N), thr = 58 * 58;
+    for (let p = 0, i = 0; p < N; p++, i += 4) { const dr = data[i] - br, dg = data[i + 1] - bg, db = data[i + 2] - bb; if (dr * dr + dg * dg + db * db > thr) mask[p] = 1; }
+    const label = new Int32Array(N), stack = new Int32Array(N), boxes = []; let lab = 0;
+    for (let p0 = 0; p0 < N; p0++) {
+      if (!mask[p0] || label[p0]) continue;
+      lab++; let sp = 0; stack[sp++] = p0; label[p0] = lab;
+      let minx = w, miny = h, maxx = 0, maxy = 0, area = 0;
+      while (sp) { const q = stack[--sp], qx = q % w, qy = (q / w) | 0; area++;
+        if (qx < minx) minx = qx; if (qx > maxx) maxx = qx; if (qy < miny) miny = qy; if (qy > maxy) maxy = qy;
+        if (qx > 0) { const n = q - 1; if (mask[n] && !label[n]) { label[n] = lab; stack[sp++] = n; } }
+        if (qx < w - 1) { const n = q + 1; if (mask[n] && !label[n]) { label[n] = lab; stack[sp++] = n; } }
+        if (qy > 0) { const n = q - w; if (mask[n] && !label[n]) { label[n] = lab; stack[sp++] = n; } }
+        if (qy < h - 1) { const n = q + w; if (mask[n] && !label[n]) { label[n] = lab; stack[sp++] = n; } }
+      }
+      boxes.push({minx, miny, maxx, maxy, area});
+    }
+    const A = w * h;
+    let cand = boxes.filter(b => { const bw = b.maxx - b.minx + 1, bh = b.maxy - b.miny + 1; return b.area > A * 0.004 && b.area < A * 0.6 && bw > 14 && bh > 14; });
+    cand.sort((a, b) => b.area - a.area); cand = cand.slice(0, 20);
+    const crops = [];
+    for (const b of cand) {
+      const bw = b.maxx - b.minx, bh = b.maxy - b.miny, pad = 0.12;
+      let x0 = (b.minx - bw * pad) / scale, y0 = (b.miny - bh * pad) / scale, x1 = (b.maxx + bw * pad) / scale, y1 = (b.maxy + bh * pad) / scale;
+      x0 = Math.max(0, x0); y0 = Math.max(0, y0); x1 = Math.min(W, x1); y1 = Math.min(H, y1);
+      const cw = Math.round(x1 - x0), ch = Math.round(y1 - y0); if (cw < 10 || ch < 10) continue;
+      const m = Math.min(1, 640 / Math.max(cw, ch)), cc = document.createElement('canvas'); cc.width = Math.round(cw * m); cc.height = Math.round(ch * m);
+      cc.getContext('2d').drawImage(img, x0, y0, cw, ch, 0, 0, cc.width, cc.height);
+      const cblob = await new Promise(r => cc.toBlob(r, 'image/jpeg', .85));
+      const tm = Math.min(1, 120 / Math.max(cc.width, cc.height)), tc = document.createElement('canvas'); tc.width = Math.round(cc.width * tm); tc.height = Math.round(cc.height * tm);
+      tc.getContext('2d').drawImage(cc, 0, 0, tc.width, tc.height);
+      crops.push({blob: cblob || cblob, thumb: tc.toDataURL('image/jpeg', .6), cx: b.minx + b.maxx, cy: b.miny + b.maxy});
+    }
+    crops.sort((a, b) => (a.cy - b.cy) || (a.cx - b.cx));
+    return crops;
+  } finally { URL.revokeObjectURL(url); }
+}
+let multiRows = [], multiKind = 'part';
+async function multiShoot() {
+  multiKind = tab;
+  const blob = (NATIVE && window.Capacitor.Plugins.RearCamera) ? await shootOnce() : await pickImage();
+  if (!blob) return;
+  openSheet(`<h2>Teile werden gesucht …</h2><div class="spin"></div><p class="center">Das Foto wird in einzelne Teile zerlegt</p>`);
+  let crops;
+  try { crops = await segment(blob); } catch (e) { crops = []; }
+  if (!crops.length) {
+    openSheet(`<h2>Keine einzelnen Teile erkannt</h2><p>Für Multi-Foto die Teile einzeln, mit etwas Abstand, auf einen hellen, ruhigen Untergrund legen (z. B. weißes Blatt).</p><div class="acts"><button class="btn pri" data-mact="rescan">Neues Foto</button><button class="btn" data-act="close">Abbrechen</button></div>`);
+    return;
+  }
+  multiRows = [];
+  for (let i = 0; i < crops.length; i++) {
+    openSheet(`<h2>Teile werden erkannt …</h2><div class="spin"></div><p class="center">${i + 1} von ${crops.length}</p>`);
+    try { const cands = await recognize(multiKind === 'fig' ? 'figs' : 'parts', crops[i].blob); if (cands.length) multiRows.push({thumb: crops[i].thumb, cands: cands.slice(0, 4), include: true}); }
+    catch (e) {}
+  }
+  if (!multiRows.length) { openSheet(`<h2>Nichts erkannt</h2><p>Die ausgeschnittenen Teile konnten nicht zugeordnet werden. Versuch es mit besserem Licht und ruhigem Hintergrund.</p><div class="acts"><button class="btn pri" data-mact="rescan">Neues Foto</button><button class="btn" data-act="close">Abbrechen</button></div>`); return; }
+  drawMulti();
+}
+function drawMulti() {
+  const isPart = multiKind === 'part';
+  openSheet(`<h2>${multiRows.length} ${isPart ? 'Teile' : 'Minifigs'} gefunden</h2>
+    <p class="center" style="text-align:left;font-size:14px;margin:2px 0 10px">Haken = übernehmen. Treffer prüfen${isPart ? ', Farbe eintragen (kann später ergänzt werden)' : ''} und Anzahl anpassen.</p>
+    <div class="mgrid">${multiRows.map((r, i) => `<div class="mrow" data-mi="${i}">
+      <img class="mthumb" src="${esc(r.thumb)}" alt="">
+      <div><select id="mcand${i}">${r.cands.map((c, j) => `<option value="${j}">${esc(c.name)} · ${esc(c.no)} (${Math.round((c.score || 0) * 100)}%)</option>`).join('')}</select>
+        <div class="mline">${isPart ? `<input class="mc" id="mcol${i}" placeholder="Farbe (z. B. Rot)" autocapitalize="words">` : '<span></span>'}<input class="mq" id="mqty${i}" inputmode="numeric" value="1" aria-label="Anzahl"></div></div>
+      <input class="minc" type="checkbox" id="minc${i}" checked aria-label="übernehmen"></div>`).join('')}</div>
+    <div class="acts"><button class="btn pri" data-mact="addall">Ausgewählte hinzufügen</button><button class="btn" data-mact="rescan">Neues Foto</button></div>`);
+}
+async function multiAddAll(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'wird hinzugefügt …'; }
+  let n = 0;
+  for (let i = 0; i < multiRows.length; i++) {
+    const inc = $('minc' + i); if (!inc || !inc.checked) continue;
+    const r = multiRows[i], ci = parseInt(($('mcand' + i) || {}).value || '0', 10) || 0, c = r.cands[ci]; if (!c) continue;
+    const colTxt = multiKind === 'part' ? (($('mcol' + i) || {}).value || '').trim() : '';
+    const qty = Math.max(1, parseInt(($('mqty' + i) || {}).value || '1', 10) || 1);
+    await commitItem({kind: multiKind, no: c.no, name: c.name, img2: c.img, color_id: null, color_name: colTxt || null, color_rgb: null}, {cond: S.settings.cond || 'U', qty, photo: r.thumb});
+    n++;
+  }
+  tab = multiKind; closeSheet(); render();
+  toast(n ? `${n} hinzugefügt${multiKind === 'part' ? ' – Farben ggf. nachtragen' : ''}` : 'Nichts ausgewählt');
+}
 
 async function startScan(file, pre) {
   const kind = tab;
@@ -651,6 +803,10 @@ function openSettings() {
     <label class="field">Consumer Secret<input id="sCs" value="${esc(st.cs)}" type="password" autocomplete="off"></label>
     <label class="field">Token Value<input id="sTk" value="${esc(st.tk)}" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
     <label class="field">Token Secret<input id="sTs" value="${esc(st.ts)}" type="password" autocomplete="off"></label>
+    <div class="help" style="margin-top:4px"><b>Für die Set-Suche ohne BrickLink: Rebrickable</b><br>Kostenloser Schlüssel, reicht ein normales Konto (kein Verkäufer nötig).<ol>
+      <li><a href="https://rebrickable.com/users/register/" target="_blank" rel="noopener">Konto anlegen</a>, dann <a href="https://rebrickable.com/api/" target="_blank" rel="noopener">API-Schlüssel erzeugen</a> (Account → Settings → API).</li>
+      <li>Den Schlüssel hier eintragen. Damit funktioniert „Sets finden“ auch ohne BrickLink.</li></ol></div>
+    <label class="field">Rebrickable-Schlüssel (optional)<input id="sRb" value="${esc(st.rb)}" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="32 Zeichen"></label>
     <div class="opts" style="margin-bottom:6px">
       <label>Währung<select id="sCur">${['EUR','USD','GBP','CHF','DKK','PLN','CZK','SEK'].map(c => `<option ${c === cur() ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
       <label>Standard-Zustand<span class="seg"><button data-scond="U" aria-pressed="${st.cond !== 'N'}">Gebraucht</button><button data-scond="N" aria-pressed="${st.cond === 'N'}">Neu</button></span></label>
@@ -659,7 +815,8 @@ function openSettings() {
     <div class="acts">
       <button class="btn pri" data-sact="save">Speichern</button>
       <button class="btn" data-sact="test">Verbindung testen</button>
-      <button class="btn" data-sact="csv">Liste als CSV kopieren</button>
+      <button class="btn" data-sact="csv">Teileliste als CSV kopieren</button>
+      <button class="btn" data-sact="blxml">Teileliste als BrickLink-Wanted-XML kopieren</button>
       <button class="btn del" data-sact="wipe">Alle Einträge löschen</button>
     </div>
     <p class="center" style="font-size:13px;margin-top:14px">Erkennung: Brickognize · Preise: BrickLink Price Guide (Ø Verkäufe der letzten 6 Monate). Schlüssel und Liste bleiben nur auf diesem Gerät.</p>`);
@@ -667,6 +824,7 @@ function openSettings() {
 function readSettings() {
   const st = S.settings, oldCur = st.currency;
   st.ck = $('sCk').value.trim(); st.cs = $('sCs').value.trim(); st.tk = $('sTk').value.trim(); st.ts = $('sTs').value.trim();
+  st.rb = $('sRb').value.trim();
   st.currency = $('sCur').value;
   const b = sheet.querySelector('[data-scond][aria-pressed=true]'); st.cond = b ? b.dataset.scond : 'U';
   save(); return oldCur !== st.currency;
@@ -686,6 +844,22 @@ async function settingsAction(act, el) {
       .concat(S.items.map(i => [i.kind === 'fig' ? 'Minifigs' : 'Teile', i.no, i.name, i.color_name || '', i.cond === 'N' ? 'Neu' : 'Gebraucht', i.qty, (i.price ?? '') === '' ? '' : String(+i.price.toFixed(3)).replace('.', ','), i.price == null ? '' : (i.price * i.qty).toFixed(2).replace('.', ','), i.currency || cur(), i.src]));
     const csv = rows.map(r => r.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(';')).join('\n');
     try { await navigator.clipboard.writeText(csv); toast('CSV kopiert – in Tabelle einfügen'); } catch (e) { toast('Kopieren nicht erlaubt'); }
+    return;
+  }
+  if (act === 'blxml') {
+    // BrickLink Wanted List XML – auf bricklink.com unter "Upload" einfügbar; dort auch "Verify Wanted List" -> Sets
+    const x = ['<INVENTORY>'];
+    for (const i of S.items) {
+      x.push('  <ITEM>');
+      x.push(`    <ITEMTYPE>${i.kind === 'fig' ? 'M' : 'P'}</ITEMTYPE>`);
+      x.push(`    <ITEMID>${esc(i.no)}</ITEMID>`);
+      if (i.kind === 'part' && i.color_id) x.push(`    <COLOR>${i.color_id}</COLOR>`);
+      x.push(`    <MINQTY>${i.qty}</MINQTY>`);
+      x.push(`    <CONDITION>${i.cond === 'N' ? 'N' : 'U'}</CONDITION>`);
+      x.push('  </ITEM>');
+    }
+    x.push('</INVENTORY>');
+    try { await navigator.clipboard.writeText(x.join('\n')); toast('BrickLink-XML kopiert – auf bricklink.com als Wanted List hochladen'); } catch (e) { toast('Kopieren nicht erlaubt'); }
     return;
   }
   if (act === 'wipe') {
@@ -780,73 +954,140 @@ finder.addEventListener('click', e => {
 });
 async function mSuper(it) { await sleep(60); const sets = it.kind === 'fig' ? [['sw0001a-set', 'Battle Pack']] : [['8360-1', 'Schwebejet'], ['10001-1', 'Großes Set']]; return [{color_id: it.color_id || 0, entries: sets.map(([no, name]) => ({item: {type: 'SET', no, name}, quantity: 1}))}]; }
 async function mSub() { await sleep(60); const base = S.items.slice(0, 3).map(it => ({entries: [{item: {type: it.kind === 'fig' ? 'MINIFIG' : 'PART', no: it.no}, color_id: it.color_id || 0, quantity: 2, is_alternate: false, is_counterpart: false}]})); base.push({entries: [{item: {type: 'PART', no: '9999'}, color_id: 1, quantity: 5, is_alternate: false, is_counterpart: false}]}); return base; }
+function finderSource() {
+  if (/[?&]src=rb/.test(location.search)) return rbReady() ? 'rb' : null;
+  if (blReady()) return 'bl';
+  if (rbReady()) return 'rb';
+  return null;
+}
 async function findSets() {
-  if (!blReady()) return openSettings();
-  const mine = S.items.filter(i => i.kind === 'fig' || (i.kind === 'part' && i.color_id));
-  if (!mine.length) { toast('Erst Teile mit Farbe scannen'); return; }
+  const src = finderSource();
+  if (!src) return openSettings();
+  const mine = src === 'rb'
+    ? S.items.filter(i => i.kind === 'part' && i.color_id) // Rebrickable: Teile mit Farbe (Minifigs nur über BrickLink)
+    : S.items.filter(i => i.kind === 'fig' || (i.kind === 'part' && i.color_id));
+  if (!mine.length) { toast(src === 'rb' ? 'Erst Teile mit Farbe scannen' : 'Erst Teile oder Minifigs scannen'); return; }
   if (finderBusy) return; finderBusy = true; finderCancel = false;
-  finderShell(`<p class="fnote">Ich schaue bei BrickLink, in welchen Sets deine Teile vorkommen, und rechne aus, wie vollständig jedes Set bei dir ist. Das kann einen Moment dauern.</p>
+  const srcName = src === 'rb' ? 'Rebrickable' : 'BrickLink';
+  finderShell(`<p class="fnote">Ich schaue bei ${srcName} nach, in welchen Sets deine ${mine.length} Teile vorkommen, und rechne aus, wie vollständig jedes Set bei dir ist. Das kann einen Moment dauern.</p>
     <p id="fstep">Schritt 1 von 2: Teile nachschlagen …</p><div class="fprog"><i id="fbar" style="width:0%"></i></div>
     <button class="btn" id="finderStop" style="height:46px">Abbrechen</button>`);
+  const prog = (step, frac, txt) => { $('fstep') && ($('fstep').textContent = txt); $('fbar') && ($('fbar').style.width = Math.round((step === 1 ? 0 : 50) + frac * 50) + '%'); };
   try {
-    // Schritt 1: Kandidaten-Sets über supersets sammeln
-    const hits = {}; let done = 0; const cap = Math.min(mine.length, 120);
-    for (let k = 0; k < cap; k++) {
-      if (finderCancel) { closeFinder(); return; }
-      const it = mine[k];
-      $('fstep') && ($('fstep').textContent = `Schritt 1 von 2: Teile nachschlagen (${k + 1}/${cap}) …`);
-      $('fbar') && ($('fbar').style.width = Math.round((k + 1) / cap * 50) + '%');
-      try {
-        const data = MOCK ? await mSuper(it) : (it.kind === 'fig'
-          ? await blGet(`/items/MINIFIG/${encodeURIComponent(it.no)}/supersets`)
-          : await blGet(`/items/PART/${encodeURIComponent(it.no)}/supersets`, {color_id: it.color_id}));
-        for (const grp of data || []) for (const e of grp.entries || []) {
-          if (!e.item || e.item.type !== 'SET') continue;
-          const sn = e.item.no;
-          (hits[sn] = hits[sn] || {name: e.item.name, members: new Set()}).members.add(matchKey(it));
-        }
-      } catch (e) { /* dieses Teil überspringen */ }
-      await sleep(130);
-    }
-    let cands = Object.entries(hits).map(([no, v]) => ({no, name: v.name, overlap: v.members.size})).sort((a, b) => b.overlap - a.overlap);
-    const multi = cands.filter(c => c.overlap >= 2);
-    cands = (multi.length ? multi : cands).slice(0, 25);
-    if (!cands.length) { finderShell(`<p class="fnote">Zu deinen Teilen wurde kein passendes Set gefunden. Scanne mehr Teile (mit Farbe), dann klappt es besser.</p>`); finderBusy = false; return; }
-    // Schritt 2: Vollständigkeit je Set über subsets berechnen
-    const results = [];
-    for (let k = 0; k < cands.length; k++) {
-      if (finderCancel) break;
-      const cand = cands[k];
-      $('fstep') && ($('fstep').textContent = `Schritt 2 von 2: Sets prüfen (${k + 1}/${cands.length}) …`);
-      $('fbar') && ($('fbar').style.width = (50 + Math.round((k + 1) / cands.length * 50)) + '%');
-      try {
-        const subs = MOCK ? await mSub() : await blGet(`/items/SET/${encodeURIComponent(cand.no)}/subsets`);
-        let req = 0, have = 0, kinds = 0, haveKinds = 0;
-        for (const grp of subs || []) {
-          const entry = (grp.entries || []).find(e => !e.is_alternate && !e.is_counterpart) || (grp.entries || [])[0];
-          if (!entry || entry.is_counterpart || !entry.item) continue;
-          const type = entry.item.type;
-          if (type !== 'PART' && type !== 'MINIFIG') continue;
-          const need = entry.quantity || 0; if (!need) continue;
-          const own = ownedQty(entry.item.no, type === 'MINIFIG', entry.color_id);
-          req += need; have += Math.min(need, own);
-          kinds++; if (own > 0) haveKinds++;
-        }
-        if (req) results.push({no: cand.no, name: cand.name, req, have, kinds, haveKinds, pct: Math.round(have / req * 100), img: `https://img.bricklink.com/ItemImage/SN/0/${encodeURIComponent(cand.no)}.png`});
-      } catch (e) { /* Set überspringen */ }
-      await sleep(130);
-    }
+    let results;
+    if (src === 'rb') results = await findSetsRb(mine, prog);
+    else results = await findSetsBl(mine, prog);
+    if (finderCancel) { closeFinder(); return; }
+    if (results === null) return; // Meldung schon gesetzt
     results.sort((a, b) => b.pct - a.pct || b.haveKinds - a.haveKinds);
-    renderFinder(results);
+    renderFinder(results, srcName);
   } catch (e) {
     finderShell(`<p class="fnote">Das hat nicht geklappt: ${esc(short(e))}</p>`);
   } finally { finderBusy = false; }
 }
-function renderFinder(results) {
-  if (!results.length) { finderShell(`<p class="fnote">Keine Sets berechnet. Versuch es mit mehr gescannten Teilen.</p>`); return; }
+async function findSetsBl(mine, prog) {
+  const hits = {}; const cap = Math.min(mine.length, 120);
+  for (let k = 0; k < cap; k++) {
+    if (finderCancel) return null;
+    const it = mine[k];
+    prog(1, (k + 1) / cap, `Schritt 1 von 2: Teile nachschlagen (${k + 1}/${cap}) …`);
+    try {
+      const data = MOCK ? await mSuper(it) : (it.kind === 'fig'
+        ? await blGet(`/items/MINIFIG/${encodeURIComponent(it.no)}/supersets`)
+        : await blGet(`/items/PART/${encodeURIComponent(it.no)}/supersets`, {color_id: it.color_id}));
+      for (const grp of data || []) for (const e of grp.entries || []) {
+        if (!e.item || e.item.type !== 'SET') continue;
+        (hits[e.item.no] = hits[e.item.no] || {name: e.item.name, members: new Set()}).members.add(matchKey(it));
+      }
+    } catch (e) {}
+    await sleep(130);
+  }
+  const cands = pickCands(hits);
+  if (!cands.length) { finderShell(`<p class="fnote">Zu deinen Teilen wurde kein passendes Set gefunden. Scanne mehr Teile (mit Farbe), dann klappt es besser.</p>`); return null; }
+  const results = [];
+  for (let k = 0; k < cands.length; k++) {
+    if (finderCancel) break;
+    const cand = cands[k];
+    prog(2, (k + 1) / cands.length, `Schritt 2 von 2: Sets prüfen (${k + 1}/${cands.length}) …`);
+    try {
+      const subs = MOCK ? await mSub() : await blGet(`/items/SET/${encodeURIComponent(cand.no)}/subsets`);
+      let req = 0, have = 0, kinds = 0, haveKinds = 0;
+      for (const grp of subs || []) {
+        const entry = (grp.entries || []).find(e => !e.is_alternate && !e.is_counterpart) || (grp.entries || [])[0];
+        if (!entry || entry.is_counterpart || !entry.item) continue;
+        const type = entry.item.type;
+        if (type !== 'PART' && type !== 'MINIFIG') continue;
+        const need = entry.quantity || 0; if (!need) continue;
+        const own = ownedQty(entry.item.no, type === 'MINIFIG', entry.color_id);
+        req += need; have += Math.min(need, own); kinds++; if (own > 0) haveKinds++;
+      }
+      if (req) results.push({no: cand.no, name: cand.name, req, have, kinds, haveKinds, pct: Math.round(have / req * 100), img: `https://img.bricklink.com/ItemImage/SN/0/${encodeURIComponent(cand.no)}.png`, link: `https://www.bricklink.com/v2/catalog/catalogitem.page?S=${encodeURIComponent(cand.no)}`});
+    } catch (e) {}
+    await sleep(130);
+  }
+  return results;
+}
+async function findSetsRb(mine, prog) {
+  const cmap = await rbColorMap();
+  // Besitz in Rebrickable-Schlüsseln: partNum|rbColor -> Stückzahl
+  const owned = {}; const rbItems = [];
+  const cap = Math.min(mine.length, 120);
+  for (let k = 0; k < cap; k++) {
+    if (finderCancel) return null;
+    const it = mine[k];
+    prog(1, (k + 1) / cap * 0.5, `Schritt 1 von 2: Teile nachschlagen (${k + 1}/${cap}) …`);
+    const rbc = cmap[it.color_id]; if (rbc == null) continue;
+    let pn; try { pn = await rbPartNum(it.no); } catch (e) { continue; }
+    if (!pn) continue;
+    const key = pn + '|' + rbc;
+    owned[key] = (owned[key] || 0) + it.qty;
+    rbItems.push({pn, rbc, member: key});
+    await sleep(120);
+  }
+  // Kandidaten-Sets über Reverse-Lookup
+  const hits = {}; const seen = new Set();
+  for (let k = 0; k < rbItems.length; k++) {
+    if (finderCancel) return null;
+    const r = rbItems[k]; const dkey = r.pn + '|' + r.rbc; if (seen.has(dkey)) continue; seen.add(dkey);
+    prog(1, 0.5 + (k + 1) / rbItems.length * 0.5, `Schritt 1 von 2: Sets suchen (${k + 1}/${rbItems.length}) …`);
+    try {
+      const sets = await rbPartSets(r.pn, r.rbc);
+      for (const s of sets || []) (hits[s.set_num] = hits[s.set_num] || {name: s.set_name || s.set_num, img: s.set_img_url, members: new Set()}).members.add(r.member);
+    } catch (e) {}
+    await sleep(140);
+  }
+  const cands = pickCands(hits);
+  if (!cands.length) { finderShell(`<p class="fnote">Zu deinen Teilen wurde über Rebrickable kein passendes Set gefunden. Scanne mehr Teile mit Farbe.</p>`); return null; }
+  const results = [];
+  for (let k = 0; k < cands.length; k++) {
+    if (finderCancel) break;
+    const cand = cands[k];
+    prog(2, (k + 1) / cands.length, `Schritt 2 von 2: Sets prüfen (${k + 1}/${cands.length}) …`);
+    try {
+      const parts = await rbSetParts(cand.no);
+      let req = 0, have = 0, kinds = 0, haveKinds = 0;
+      for (const p of parts || []) {
+        if (p.is_spare) continue;
+        const need = p.quantity || 0; if (!need) continue;
+        const own = owned[(p.part && p.part.part_num) + '|' + (p.color && p.color.id)] || 0;
+        req += need; have += Math.min(need, own); kinds++; if (own > 0) haveKinds++;
+      }
+      if (req) results.push({no: cand.no, name: cand.name, req, have, kinds, haveKinds, pct: Math.round(have / req * 100), img: cand.img || `https://cdn.rebrickable.com/media/sets/${encodeURIComponent(cand.no)}.jpg`, link: `https://rebrickable.com/sets/${encodeURIComponent(cand.no)}/`});
+    } catch (e) {}
+    await sleep(140);
+  }
+  return results;
+}
+function pickCands(hits) {
+  let cands = Object.entries(hits).map(([no, v]) => ({no, name: v.name, img: v.img, overlap: v.members.size})).sort((a, b) => b.overlap - a.overlap);
+  const multi = cands.filter(c => c.overlap >= 2);
+  return (multi.length ? multi : cands).slice(0, 25);
+}
+function renderFinder(results, srcName) {
+  if (!results || !results.length) { finderShell(`<p class="fnote">Keine Sets berechnet. Versuch es mit mehr gescannten Teilen.</p>`); return; }
   const col = p => p >= 90 ? 'var(--ok)' : p >= 50 ? 'var(--y2)' : 'var(--r)';
-  finderShell(`<p class="fnote">Sortiert nach Vollständigkeit. Die Prozentzahl zählt die Teile-Stückzahl, die du von diesem Set schon hast.</p>` +
-    results.map(r => `<a class="setrow" href="https://www.bricklink.com/v2/catalog/catalogitem.page?S=${encodeURIComponent(r.no)}" target="_blank" rel="noopener">
+  finderShell(`<p class="fnote">Quelle: ${esc(srcName || 'BrickLink')}. Sortiert nach Vollständigkeit – die Prozentzahl zählt die Teile-Stückzahl, die du von diesem Set schon hast.</p>` +
+    results.map(r => `<a class="setrow" href="${esc(r.link)}" target="_blank" rel="noopener">
       <div class="thumb"><img src="${esc(r.img)}" alt="" loading="lazy"></div>
       <div><div class="nm">${esc(r.name)}</div><div class="meta"><span>${esc(r.no)}</span><span>${r.haveKinds}/${r.kinds} versch. Teile</span><span>${r.have}/${r.req} Stück</span></div><div class="bar2"><i style="width:${r.pct}%;background:${col(r.pct)}"></i></div></div>
       <span class="pct" style="color:${col(r.pct)}">${r.pct}%</span></a>`).join(''));
@@ -907,9 +1148,12 @@ sheet.addEventListener('click', e => {
   if (d.iact) return itemAction(d.iact, t);
   if (d.scond) { t.parentNode.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b === t))); return; }
   if (d.sact) return settingsAction(d.sact, t);
+  if (d.mact === 'rescan') { closeSheet(); return multiShoot(); }
+  if (d.mact === 'addall') return multiAddAll(t);
 });
 sheet.addEventListener('input', e => { if (e.target.id === 'colorTxt' && scan) scan.colorTxt = e.target.value; });
 sheet.addEventListener('change', e => {
+  if (e.target.id && /^minc\d+$/.test(e.target.id)) { const row = e.target.closest('.mrow'); if (row) row.classList.toggle('off', !e.target.checked); return; }
   if (e.target.id === 'color' && scan) scan.color = e.target.value;
   if (e.target.id === 'colorTxt' && scan) scan.colorTxt = e.target.value;
   if (e.target.id === 'qty' && scan) scan.qty = Math.max(1, parseInt(e.target.value, 10) || 1);
