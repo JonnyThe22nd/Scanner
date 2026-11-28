@@ -420,12 +420,15 @@ async function dominantColor(blob) {
     return dominantFromData(ctx.getImageData(0,0,w,h).data, w, h);
   } catch (e) { return null; } finally { URL.revokeObjectURL(url); }
 }
-// Beste Farbvermutung: mit Schlüssel aus der vollen BrickLink-Liste (liefert color_id), sonst aus der eingebauten Liste
+// Beste Farbvermutung: mit Schlüssel aus der vollen BrickLink-Liste, sonst aus der eingebauten Liste – immer mit (BrickLink-)Farb-ID
 function guessColor(rgb) {
   if (!rgb) return null;
   if (blReady() && S.colors) { const arr = Object.values(S.colors).filter(c => c.rgb); if (arr.length) { const b = nearestColor(arr, rgb); if (b) return {id: b.id, name: b.name, rgb: b.rgb}; } }
-  const b = nearestColor(CUR_COLORS, rgb); return b ? {id: blReady() ? b.id : null, name: b.name, rgb: b.rgb} : null;
+  const b = nearestColor(CUR_COLORS, rgb); return b ? {id: b.id, name: b.name, rgb: b.rgb} : null;
 }
+// Eingebaute Farb-Auswahl (für Scannen ohne BrickLink-Schlüssel) – liefert eine echte Farb-Nummer
+const paletteOptions = sel => `<option value="">Farbe wählen …</option>` + CUR_COLORS.slice().sort((a, b) => a.name.localeCompare(b.name)).map(c => `<option value="${c.id}" ${String(c.id) === String(sel) ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
+const curColor = id => CUR_COLORS.find(c => String(c.id) === String(id)) || null;
 
 /* ================================================================ render */
 const needsColor = it => it.kind === 'part' && !it.color_name;
@@ -725,8 +728,8 @@ async function startScan(file, pre) {
     my.cands = await recognize(kind === 'fig' ? 'figs' : 'parts', blob);
     if (scan !== my) return;
     if (!my.cands.length) my.manual = true;
-    // Ohne Schlüssel: Farbe automatisch vorausfüllen
-    if (kind === 'part' && !blReady() && my.rgb && !my.colorTxt) { const g = guessColor(my.rgb); if (g) my.colorTxt = g.name; }
+    // Ohne BrickLink-Schlüssel: Farbe aus der eingebauten Liste automatisch vorauswählen (echte Farb-Nummer)
+    if (kind === 'part' && !blReady() && my.rgb && !my.color) { const g = guessColor(my.rgb); if (g) my.color = String(g.id); }
     drawScan(); if (kind === 'part' && my.cands.length) loadColors();
   } catch (e) {
     if (scan !== my) return;
@@ -747,7 +750,7 @@ function drawScan() {
   const optsHtml = `<h3>Angaben</h3><div class="opts">
       <label>Zustand<span class="seg"><button data-cond="U" aria-pressed="${s.cond === 'U'}">Gebraucht</button><button data-cond="N" aria-pressed="${s.cond === 'N'}">Neu</button></span></label>
       <label>Anzahl<span class="step"><button data-q="-1" aria-label="weniger">−</button><input id="qty" inputmode="numeric" value="${s.qty}" aria-label="Anzahl"><button data-q="1" aria-label="mehr">+</button></span></label>
-      ${isPart && !s.manual && !blReady() ? `<label>Farbe (optional)<input id="colorTxt" value="${esc(s.colorTxt || '')}" placeholder="z. B. Rot" style="height:44px;border-radius:12px;border:1px solid var(--line);background:var(--card);padding:0 12px;font-size:16px;width:180px"></label>` : ''}
+      ${isPart && !s.manual && !blReady() ? `<label>Farbe<select id="colorSel">${paletteOptions(s.color)}</select></label>` : ''}
       ${isPart && !s.manual && blReady() ? `<label>Farbe${s.colors == null ? '<select disabled><option>Farben werden geladen …</option></select>'
         : `<select id="color"><option value="">Alle Farben (Durchschnitt)</option>${s.colors.map(c => `<option value="${esc(c.id)}" ${String(c.id) === String(s.color) ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>`}</label>` : ''}
     </div>${s.colorErr ? `<p class="center" style="font-size:13px;text-align:left">${esc(s.colorErr)}</p>` : ''}`;
@@ -1172,10 +1175,12 @@ sheet.addEventListener('click', e => {
     if (d.act === 'manual') { if (!scan) scan = {kind: tab, cands: [], sel: 0, cond: S.settings.cond || 'U', qty: 1, photo: ''}; scan.manual = true; return drawScan(); }
     if (d.act === 'back') { s.manual = false; drawScan(); if (s.kind === 'part' && s.colors == null) loadColors(); return; }
     if (d.act === 'add') {
-      const c = s.cands[s.sel]; const col = s.color && S.colors && blReady() ? S.colors[s.color] : null;
-      // Mit Schlüssel: Farbe für Teile Pflicht (ohne Schlüssel kommt sie gleich im Preis-Fenster)
-      if (blReady() && s.kind === 'part' && !col) { const sel = $('color'); if (sel) { sel.focus(); sel.style.borderColor = 'var(--r)'; } return toast('Bitte zuerst die Farbe wählen'); }
-      return addItem({kind: s.kind, no: c.no, name: c.name, img2: c.img, color_id: col ? col.id : null, color_name: col ? col.name : (s.kind === 'part' && (s.colorTxt || '').trim() ? s.colorTxt.trim() : null), color_rgb: col ? col.rgb : null});
+      const c = s.cands[s.sel];
+      // Farbe aus der jeweiligen Auswahl (mit Schlüssel: BrickLink-Liste, sonst eingebaute Liste) – beide liefern eine Farb-Nummer
+      const col = s.kind === 'part' && s.color ? (blReady() && S.colors ? S.colors[s.color] : curColor(s.color)) : null;
+      // Farbe für Teile Pflicht
+      if (s.kind === 'part' && !col) { const sel = $('color') || $('colorSel'); if (sel) { sel.focus(); sel.style.borderColor = 'var(--r)'; } return toast('Bitte zuerst die Farbe wählen'); }
+      return addItem({kind: s.kind, no: c.no, name: c.name, img2: c.img, color_id: col ? col.id : null, color_name: col ? col.name : null, color_rgb: col ? col.rgb : null});
     }
     if (d.act === 'addManual') {
       const no = $('mNo').value.trim(); if (!no) { $('mNo').focus(); return toast('Bitte BrickLink-Nummer eingeben'); }
@@ -1201,7 +1206,7 @@ sheet.addEventListener('click', e => {
 sheet.addEventListener('input', e => { if (e.target.id === 'colorTxt' && scan) scan.colorTxt = e.target.value; });
 sheet.addEventListener('change', e => {
   if (e.target.id && /^minc\d+$/.test(e.target.id)) { const row = e.target.closest('.mrow'); if (row) row.classList.toggle('off', !e.target.checked); return; }
-  if (e.target.id === 'color' && scan) scan.color = e.target.value;
+  if ((e.target.id === 'color' || e.target.id === 'colorSel') && scan) scan.color = e.target.value;
   if (e.target.id === 'colorTxt' && scan) scan.colorTxt = e.target.value;
   if (e.target.id === 'qty' && scan) scan.qty = Math.max(1, parseInt(e.target.value, 10) || 1);
   if (e.target.id === 'iqty') { const it = S.items.find(i => i.uid === sheet.dataset.uid); if (it) { it.qty = Math.max(1, parseInt(e.target.value, 10) || 1); save(); render(); openItem(it.uid); } }
