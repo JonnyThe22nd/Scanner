@@ -111,6 +111,18 @@ a{color:var(--r)}
 .toast button{margin-left:auto;border:0;background:var(--y);color:#1a1a1a;border-radius:9px;padding:8px 12px;font-weight:700;flex:none}
 .ok{color:var(--ok)}.bad{color:var(--r)}
 .warnchip{background:light-dark(#ffe1c2,#3a2410);color:var(--warn);font-weight:700;border-radius:6px;padding:1px 7px}
+.chip[aria-pressed=true]{background:var(--y);border-color:var(--y2);color:#1a1a1a;font-weight:700}
+.finder{position:fixed;inset:0;z-index:45;background:var(--bg);display:flex;flex-direction:column;overflow:auto}
+.finder .fhead{position:sticky;top:0;background:var(--y);color:#1a1a1a;padding:calc(12px + env(safe-area-inset-top)) 16px 12px;display:flex;align-items:center;gap:10px;font-weight:800;font-size:17px}
+.finder .fbody{padding:12px 16px calc(20px + env(safe-area-inset-bottom))}
+.fprog{height:8px;border-radius:5px;background:var(--line);overflow:hidden;margin:10px 0}
+.fprog i{display:block;height:100%;background:var(--r);transition:width .2s}
+.setrow{display:grid;grid-template-columns:64px minmax(0,1fr) auto;gap:12px;align-items:center;padding:10px;border-radius:14px;background:var(--card);margin-bottom:8px;text-decoration:none;color:inherit}
+.setrow .thumb{width:64px;height:64px;border-radius:10px}
+.setrow .pct{text-align:right;font-weight:800;font-size:18px;white-space:nowrap}
+.setrow .bar2{height:6px;border-radius:3px;background:var(--line);margin-top:6px;overflow:hidden}
+.setrow .bar2 i{display:block;height:100%}
+.fnote{font-size:14px;color:var(--mut);background:var(--card);border-radius:12px;padding:12px 14px;margin:4px 0 14px}
 .cam{position:fixed;inset:0;z-index:50;background:#000;color:#fff;display:flex;flex-direction:column}
 .cam video{flex:1;min-height:0;width:100%;object-fit:cover;background:#000}
 .cam .guide{position:absolute;left:50%;top:45%;width:min(70vw,62vh);aspect-ratio:1;transform:translate(-50%,-50%);border:3px solid rgba(255,207,0,.9);border-radius:24px;box-shadow:0 0 0 100vmax rgba(0,0,0,.28);pointer-events:none}
@@ -160,6 +172,8 @@ a{color:var(--r)}
     <option value="val">Höchster Wert</option>
     <option value="name">Name A–Z</option>
   </select>
+  <button class="chip" id="btnBulk" aria-pressed="false"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg><span>Schnell-Scan</span></button>
+  <button class="chip" id="btnFinder" hidden><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><path d="M3 8.5 12 4l9 4.5-9 4.5z"/><path d="M3 8.5v7L12 20l9-4.5v-7"/><path d="M12 13v7"/></svg><span>Sets finden</span></button>
   <button class="chip" id="btnRefresh"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg><span>Preise neu</span></button>
 </div>
 
@@ -173,6 +187,7 @@ a{color:var(--r)}
 <input type="file" id="fileGal" accept="image/*" hidden>
 
 <div class="veil" id="veil"><div class="sheet" id="sheet" role="dialog" aria-modal="true"></div></div>
+<div class="finder" id="finder" hidden></div>
 <div class="cam" id="cam" hidden>
   <video id="camVideo" autoplay playsinline muted></video>
   <div class="guide"></div>
@@ -355,9 +370,10 @@ function render() {
   $('sum-fig').textContent = `${f.n} · ${money(f.v)}`;
   $('sum-part').textContent = `${p.n} · ${money(p.v)}`;
   for (const k of ['fig','part']) $('tab-' + k).setAttribute('aria-selected', String(tab === k));
-  $('scanLabel').textContent = tab === 'fig' ? 'Minifig scannen' : 'Teil scannen';
+  $('scanLabel').textContent = (typeof bulk !== 'undefined' && bulk) ? 'Schnell-Scan' : (tab === 'fig' ? 'Minifig scannen' : 'Teil scannen');
   $('setupNote').hidden = blReady();
   $('btnRefresh').hidden = !blReady();
+  $('btnFinder').hidden = !blReady() || !S.items.length;
   let its = S.items.filter(i => i.kind === tab);
   if (sort === 'val') its = its.slice().sort((x, y) => (y.price || 0) * y.qty - (x.price || 0) * x.qty);
   else if (sort === 'name') its = its.slice().sort((x, y) => x.name.localeCompare(y.name));
@@ -449,23 +465,57 @@ $('camShut').onclick = async () => {
 };
 document.addEventListener('visibilitychange', () => { if (document.hidden && camStream) stopCam(); });
 
-/* Scannen: native System-Kamera (Blitz + Autofokus, Rückkamera). Sonst normale Kamera. */
-async function shoot() {
+/* Ein Foto von der nativen System-Kamera holen (Rückkamera). Gibt Blob oder null (Abbruch). */
+async function shootOnce() {
   const Cam = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.RearCamera;
-  if (!(NATIVE && Cam)) return pickFile(false);
+  if (!(NATIVE && Cam)) return null; // kein nativer Pfad -> Aufrufer nutzt Datei-Auswahl
   let res;
-  try { res = await Cam.shoot(); }
-  catch (e) { if (/cancel/i.test(String(e && (e.message || e)))) return; return pickFile(false); }
-  const path = res && res.path; if (!path) return;
+  try { res = await Cam.shoot(); } catch (e) { return null; }
+  const path = res && res.path; if (!path) return null;
   try {
     const url = window.Capacitor.convertFileSrc(path.startsWith('file://') ? path : 'file://' + path);
     const blob = await (await fetch(url)).blob();
-    if (blob && blob.size) startScan(blob); else pickFile(false);
-  } catch (e) { toast('Foto konnte nicht geladen werden'); }
+    return blob && blob.size ? blob : null;
+  } catch (e) { return null; }
 }
-$('btnScan').onclick = shoot;
+/* Einzelscan: Foto -> Bestätigen-Fenster */
+async function shoot() {
+  if (!(NATIVE && window.Capacitor.Plugins.RearCamera)) return pickFile(false);
+  const blob = await shootOnce();
+  if (blob) startScan(blob); // null = abgebrochen
+}
+/* Schnell-Scan: Foto -> Top-Treffer sofort übernehmen -> gleich wieder Kamera, bis Abbruch */
+let bulkRunning = false;
+async function bulkShoot() {
+  if (!(NATIVE && window.Capacitor.Plugins.RearCamera)) { toast('Schnell-Scan braucht die native Kamera'); return; }
+  if (bulkRunning) return; bulkRunning = true;
+  let added = 0;
+  try {
+    while (bulk) {
+      const blob = await shootOnce();
+      if (!blob) break; // Abbruch beendet den Schnell-Scan
+      const kind = tab;
+      try {
+        const {blob: small, thumb} = await prep(blob);
+        const cands = await recognize(kind === 'fig' ? 'figs' : 'parts', small);
+        if (!cands.length) { toast('Nicht erkannt – nochmal'); continue; }
+        const c = cands[0];
+        const {item, dup} = await commitItem({kind, no: c.no, name: c.name, img2: c.img, color_id: null, color_name: null, color_rgb: null}, {cond: S.settings.cond || 'U', qty: 1, photo: thumb});
+        added++; render();
+        toast(`${dup ? 'jetzt ' + item.qty + '× ' : ''}${item.name}${needsColor(item) ? ' · Farbe fehlt' : ''}`);
+      } catch (e) { toast(short(e)); }
+    }
+  } finally { bulkRunning = false; if (added) toast(`Schnell-Scan beendet – ${added} erfasst`); }
+}
+function short(e) { const m = String(e && (e.message || e)); return m.length > 80 ? m.slice(0, 80) : m; }
+$('btnScan').onclick = () => bulk ? bulkShoot() : shoot();
 $('btnGallery').onclick = () => pickFile(true);
 for (const id of ['fileCam','fileGal']) $(id).addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if (f) startScan(f); });
+let bulk = false;
+try { bulk = localStorage.getItem(KEY + '.bulk') === '1'; } catch (e) {}
+function setBulk(v) { bulk = v; try { localStorage.setItem(KEY + '.bulk', v ? '1' : '0'); } catch (e) {} $('btnBulk').setAttribute('aria-pressed', String(v)); $('scanLabel').textContent = v ? 'Schnell-Scan' : (tab === 'fig' ? 'Minifig scannen' : 'Teil scannen'); }
+$('btnBulk').onclick = () => setBulk(!bulk);
+setBulk(bulk);
 
 async function startScan(file, pre) {
   const kind = tab;
@@ -520,26 +570,25 @@ function drawScan() {
     ${optsHtml}
     <div class="acts"><button class="btn pri" data-act="add">Ja, zur Liste hinzufügen</button><button class="btn" data-act="rescan">Nein, nochmal scannen</button></div>`);
 }
-async function addItem(base) {
-  const s = scan;
-  const it = Object.assign({uid: uid(), added: Date.now(), cond: s.cond, qty: s.qty, price: null, currency: cur(), src: 'none', photo: s.photo}, base);
+/* Kern: Eintrag anlegen oder – wenn schon vorhanden – Anzahl erhöhen. Holt den Preis. */
+async function commitItem(base, opt) {
+  const it = Object.assign({uid: uid(), added: Date.now(), cond: opt.cond, qty: opt.qty, price: null, currency: cur(), src: 'none', photo: opt.photo || ''}, base);
   it.img = blImg(it.kind, it.no, it.color_id) || it.img2 || '';
-  // Schon vorhanden? Dann Anzahl erhöhen statt neuen Eintrag anlegen
   const dup = S.items.find(x => matchKey(x) === matchKey(it));
-  if (dup) {
-    dup.qty += it.qty; dup.added = Date.now(); save();
-    tab = dup.kind; closeSheet(); render();
-    if (!blReady() && dup.price == null) return openReader(dup);
-    toast(`Schon in der Liste – jetzt ${dup.qty}× (${money((dup.price || 0) * dup.qty, dup.currency, true)})`);
-    return;
-  }
-  const btn = sheet.querySelector('[data-act^=add]'); if (btn) { btn.disabled = true; btn.textContent = 'Preis wird geholt …'; }
+  if (dup) { dup.qty += it.qty; dup.added = Date.now(); save(); return {item: dup, dup: true}; }
   await applyPrice(it);
   S.items.push(it); save();
-  tab = it.kind; closeSheet(); render();
-  if (!blReady()) return openReader(it);
-  if (needsColor(it)) toast(`${it.name}: ${money(it.price * it.qty, it.currency, true)} – bitte Farbe wählen`);
-  else toast(it.price != null ? `${it.name}: ${money(it.price * it.qty, it.currency, true)}` : `${it.name} hinzugefügt – ${it.err || 'kein Preis gefunden'}`);
+  return {item: it, dup: false};
+}
+async function addItem(base) {
+  const s = scan;
+  const btn = sheet.querySelector('[data-act^=add]'); if (btn) { btn.disabled = true; btn.textContent = 'Preis wird geholt …'; }
+  const {item, dup} = await commitItem(base, {cond: s.cond, qty: s.qty, photo: s.photo});
+  tab = item.kind; closeSheet(); render();
+  if (!blReady() && item.price == null) return openReader(item);
+  if (dup) return toast(`Schon in der Liste – jetzt ${item.qty}× (${money((item.price || 0) * item.qty, item.currency, true)})`);
+  if (needsColor(item)) toast(`${item.name}: ${money(item.price * item.qty, item.currency, true)} – bitte Farbe wählen`);
+  else toast(item.price != null ? `${item.name}: ${money(item.price * item.qty, item.currency, true)}` : `${item.name} hinzugefügt – ${item.err || 'kein Preis gefunden'}`);
 }
 
 /* ---------- item details */
@@ -711,6 +760,99 @@ reader.addEventListener('click', e => {
 });
 reader.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'rprice') $('rsave').click(); });
 
+/* ---------- Set-Finder: welche Sets ergeben deine Teile? (nutzt BrickLink supersets/subsets) */
+const finder = $('finder');
+let finderBusy = false, finderCancel = false;
+// Wie viele Stück dieses Teils/Minifigs besitzt der Nutzer (Zustand egal)
+function ownedQty(no, isFig, colorId) {
+  const kind = isFig ? 'fig' : 'part';
+  return S.items.filter(i => i.kind === kind && String(i.no).toLowerCase() === String(no).toLowerCase() && (isFig || String(i.color_id || '') === String(colorId || ''))).reduce((a, i) => a + i.qty, 0);
+}
+function finderShell(inner) {
+  finder.innerHTML = `<div class="fhead"><button class="icon-btn" id="finderClose" aria-label="Schließen" style="margin:0;background:rgba(0,0,0,.08);color:#1a1a1a"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button><span>Sets finden</span></div><div class="fbody" id="finderBody">${inner}</div>`;
+  finder.hidden = false;
+}
+function closeFinder() { finderCancel = true; finder.hidden = true; finder.innerHTML = ''; }
+finder.addEventListener('click', e => {
+  const t = e.target.closest('button'); if (!t) return;
+  if (t.id === 'finderClose') return closeFinder();
+  if (t.id === 'finderStop') { finderCancel = true; t.textContent = 'wird beendet …'; }
+});
+async function mSuper(it) { await sleep(60); const sets = it.kind === 'fig' ? [['sw0001a-set', 'Battle Pack']] : [['8360-1', 'Schwebejet'], ['10001-1', 'Großes Set']]; return [{color_id: it.color_id || 0, entries: sets.map(([no, name]) => ({item: {type: 'SET', no, name}, quantity: 1}))}]; }
+async function mSub() { await sleep(60); const base = S.items.slice(0, 3).map(it => ({entries: [{item: {type: it.kind === 'fig' ? 'MINIFIG' : 'PART', no: it.no}, color_id: it.color_id || 0, quantity: 2, is_alternate: false, is_counterpart: false}]})); base.push({entries: [{item: {type: 'PART', no: '9999'}, color_id: 1, quantity: 5, is_alternate: false, is_counterpart: false}]}); return base; }
+async function findSets() {
+  if (!blReady()) return openSettings();
+  const mine = S.items.filter(i => i.kind === 'fig' || (i.kind === 'part' && i.color_id));
+  if (!mine.length) { toast('Erst Teile mit Farbe scannen'); return; }
+  if (finderBusy) return; finderBusy = true; finderCancel = false;
+  finderShell(`<p class="fnote">Ich schaue bei BrickLink, in welchen Sets deine Teile vorkommen, und rechne aus, wie vollständig jedes Set bei dir ist. Das kann einen Moment dauern.</p>
+    <p id="fstep">Schritt 1 von 2: Teile nachschlagen …</p><div class="fprog"><i id="fbar" style="width:0%"></i></div>
+    <button class="btn" id="finderStop" style="height:46px">Abbrechen</button>`);
+  try {
+    // Schritt 1: Kandidaten-Sets über supersets sammeln
+    const hits = {}; let done = 0; const cap = Math.min(mine.length, 120);
+    for (let k = 0; k < cap; k++) {
+      if (finderCancel) { closeFinder(); return; }
+      const it = mine[k];
+      $('fstep') && ($('fstep').textContent = `Schritt 1 von 2: Teile nachschlagen (${k + 1}/${cap}) …`);
+      $('fbar') && ($('fbar').style.width = Math.round((k + 1) / cap * 50) + '%');
+      try {
+        const data = MOCK ? await mSuper(it) : (it.kind === 'fig'
+          ? await blGet(`/items/MINIFIG/${encodeURIComponent(it.no)}/supersets`)
+          : await blGet(`/items/PART/${encodeURIComponent(it.no)}/supersets`, {color_id: it.color_id}));
+        for (const grp of data || []) for (const e of grp.entries || []) {
+          if (!e.item || e.item.type !== 'SET') continue;
+          const sn = e.item.no;
+          (hits[sn] = hits[sn] || {name: e.item.name, members: new Set()}).members.add(matchKey(it));
+        }
+      } catch (e) { /* dieses Teil überspringen */ }
+      await sleep(130);
+    }
+    let cands = Object.entries(hits).map(([no, v]) => ({no, name: v.name, overlap: v.members.size})).sort((a, b) => b.overlap - a.overlap);
+    const multi = cands.filter(c => c.overlap >= 2);
+    cands = (multi.length ? multi : cands).slice(0, 25);
+    if (!cands.length) { finderShell(`<p class="fnote">Zu deinen Teilen wurde kein passendes Set gefunden. Scanne mehr Teile (mit Farbe), dann klappt es besser.</p>`); finderBusy = false; return; }
+    // Schritt 2: Vollständigkeit je Set über subsets berechnen
+    const results = [];
+    for (let k = 0; k < cands.length; k++) {
+      if (finderCancel) break;
+      const cand = cands[k];
+      $('fstep') && ($('fstep').textContent = `Schritt 2 von 2: Sets prüfen (${k + 1}/${cands.length}) …`);
+      $('fbar') && ($('fbar').style.width = (50 + Math.round((k + 1) / cands.length * 50)) + '%');
+      try {
+        const subs = MOCK ? await mSub() : await blGet(`/items/SET/${encodeURIComponent(cand.no)}/subsets`);
+        let req = 0, have = 0, kinds = 0, haveKinds = 0;
+        for (const grp of subs || []) {
+          const entry = (grp.entries || []).find(e => !e.is_alternate && !e.is_counterpart) || (grp.entries || [])[0];
+          if (!entry || entry.is_counterpart || !entry.item) continue;
+          const type = entry.item.type;
+          if (type !== 'PART' && type !== 'MINIFIG') continue;
+          const need = entry.quantity || 0; if (!need) continue;
+          const own = ownedQty(entry.item.no, type === 'MINIFIG', entry.color_id);
+          req += need; have += Math.min(need, own);
+          kinds++; if (own > 0) haveKinds++;
+        }
+        if (req) results.push({no: cand.no, name: cand.name, req, have, kinds, haveKinds, pct: Math.round(have / req * 100), img: `https://img.bricklink.com/ItemImage/SN/0/${encodeURIComponent(cand.no)}.png`});
+      } catch (e) { /* Set überspringen */ }
+      await sleep(130);
+    }
+    results.sort((a, b) => b.pct - a.pct || b.haveKinds - a.haveKinds);
+    renderFinder(results);
+  } catch (e) {
+    finderShell(`<p class="fnote">Das hat nicht geklappt: ${esc(short(e))}</p>`);
+  } finally { finderBusy = false; }
+}
+function renderFinder(results) {
+  if (!results.length) { finderShell(`<p class="fnote">Keine Sets berechnet. Versuch es mit mehr gescannten Teilen.</p>`); return; }
+  const col = p => p >= 90 ? 'var(--ok)' : p >= 50 ? 'var(--y2)' : 'var(--r)';
+  finderShell(`<p class="fnote">Sortiert nach Vollständigkeit. Die Prozentzahl zählt die Teile-Stückzahl, die du von diesem Set schon hast.</p>` +
+    results.map(r => `<a class="setrow" href="https://www.bricklink.com/v2/catalog/catalogitem.page?S=${encodeURIComponent(r.no)}" target="_blank" rel="noopener">
+      <div class="thumb"><img src="${esc(r.img)}" alt="" loading="lazy"></div>
+      <div><div class="nm">${esc(r.name)}</div><div class="meta"><span>${esc(r.no)}</span><span>${r.haveKinds}/${r.kinds} versch. Teile</span><span>${r.have}/${r.req} Stück</span></div><div class="bar2"><i style="width:${r.pct}%;background:${col(r.pct)}"></i></div></div>
+      <span class="pct" style="color:${col(r.pct)}">${r.pct}%</span></a>`).join(''));
+}
+$('btnFinder').onclick = findSets;
+
 /* ---------- refresh all */
 let refreshing = false;
 async function refreshAll() {
@@ -778,6 +920,7 @@ sheet.addEventListener('change', e => {
 const App = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
 if (App && App.addListener) {
   App.addListener('backButton', () => {
+    if (!finder.hidden) { closeFinder(); return; }            // Set-Finder
     if (!$('reader').hidden) { closeReader(); return; }      // Preis-Fenster
     if (!camEl.hidden) { stopCam(); return; }                 // (falls doch Kamera-Overlay)
     if (veil.classList.contains('open')) { closeSheet(); return; } // Eingabe-/Detail-Fenster
